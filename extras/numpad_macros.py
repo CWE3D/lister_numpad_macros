@@ -25,10 +25,6 @@ class NumpadMacros:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
 
-        # Configuration - Register these options first
-        config.get_name_config_value('device_paths')  # Mark as used
-        config.get_name_config_value('debug_log')  # Mark as used
-
         # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
         self.device_paths = [path.strip() for path in device_paths]
