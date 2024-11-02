@@ -12,7 +12,7 @@ from typing import Dict, Optional, Any, Union, List
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_READ_TIMEOUT = 0.1
-DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd'
+DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
 
 
 class NumpadMacros:
