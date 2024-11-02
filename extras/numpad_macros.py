@@ -2,6 +2,8 @@ import evdev
 from evdev import InputDevice, categorize, ecodes
 import threading
 import logging
+import json
+
 
 class NumpadMacros:
     def __init__(self, config):
@@ -41,8 +43,48 @@ class NumpadMacros:
             evdev.ecodes.KEY_KPDOT: "DOT"
         }
 
+        # Default command mapping
+        self.command_mapping = {
+            "1": "HOME",
+            "2": "PROBE_BED_MESH",
+            "3": "Z_TILT_ADJUST",
+            "4": "BED_PROBE_MANUAL_ADJUST",
+            "5": "TURN_ON_LIGHT",
+            "6": "TURN_OFF_LIGHT",
+            "7": "DISABLE_X_Y_STEPPERS",
+            "8": "DISABLE_EXTRUDER_STEPPER",
+            "9": "COLD_CHANGE_FILAMENT",
+            "0": "TOGGLE_FILAMENT_SENSOR",
+            "DOT": "PROBE_NOZZLE_DISTANCE",
+            "ENTER": "RESUME"
+        }
+
         # Start the input monitoring thread
         self.input_thread = None
+
+        # Register for Moonraker component initialization
+        self.printer.register_event_handler(
+            'moonraker:connected',
+            self.handle_moonraker_connected
+        )
+
+    def handle_moonraker_connected(self):
+        """Called when Moonraker connects"""
+        logging.info("NumpadMacros: Moonraker connected")
+        # Send initial configuration to Moonraker
+        self.send_status_to_moonraker()
+
+    def send_status_to_moonraker(self):
+        """Send current status to Moonraker"""
+        try:
+            status = {
+                'command_mapping': self.command_mapping,
+                'connected': hasattr(self, 'device'),
+                'device_name': self.device.name if hasattr(self, 'device') else None
+            }
+            self.printer.send_event("numpad:status_update", json.dumps(status))
+        except Exception as e:
+            logging.error(f"NumpadMacros: Error sending status to Moonraker: {str(e)}")
 
     def handle_connect(self):
         """Called when printer connects"""
@@ -54,6 +96,9 @@ class NumpadMacros:
             self.input_thread = threading.Thread(target=self._monitor_input)
             self.input_thread.daemon = True
             self.input_thread.start()
+
+            # Send initial status to Moonraker
+            self.send_status_to_moonraker()
 
         except Exception as e:
             logging.error(f"NumpadMacros: Failed to initialize device: {str(e)}")
@@ -91,15 +136,18 @@ class NumpadMacros:
     def _handle_key_press(self, key):
         """Handle a key press event"""
         try:
-            # For testing, just respond with the key pressed
-            self.gcode.run_script_from_command(f'RESPOND MSG="Numpad key pressed: {key}"')
+            # Notify Moonraker of key press
+            self.printer.send_event("numpad:keypress", json.dumps({
+                'key': key,
+                'command': self.command_mapping.get(key, "Unknown")
+            }))
 
-            # Here you would implement the actual G-code execution for each key
-            # For example:
-            if key == "1":
-                # Example: Move to home position when 1 is pressed
-                # self.gcode.run_script_from_command('G28')
-                pass
+            # Execute mapped command if available
+            command = self.command_mapping.get(key)
+            if command:
+                self.gcode.run_script_from_command(command)
+            else:
+                self.gcode.respond_info(f"No command mapped for key: {key}")
 
         except Exception as e:
             logging.error(f"NumpadMacros: Error handling key press: {str(e)}")
@@ -109,8 +157,17 @@ class NumpadMacros:
         gcmd.respond_info("NumpadMacros test command received")
         if hasattr(self, 'device'):
             gcmd.respond_info(f"Connected to: {self.device.name}")
+            gcmd.respond_info(f"Current command mapping: {json.dumps(self.command_mapping, indent=2)}")
         else:
             gcmd.respond_info("No numpad device connected")
+
+    def get_status(self, eventtime=None):
+        """Return status for Moonraker"""
+        return {
+            'command_mapping': self.command_mapping,
+            'connected': hasattr(self, 'device'),
+            'device_name': self.device.name if hasattr(self, 'device') else None
+        }
 
 
 def load_config(config):
