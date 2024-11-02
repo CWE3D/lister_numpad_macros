@@ -14,6 +14,7 @@ class NumpadMacros:
 
         # Get configuration
         self.device_path = config.get('device_path', '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd')
+        self.debug_log = config.getboolean('debug_log', False)  # Add debug logging configuration
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
@@ -68,9 +69,19 @@ class NumpadMacros:
             self.handle_moonraker_connected
         )
 
+        # Log initialization if debug is enabled
+        self._debug_log("NumpadMacros initialized with debug logging enabled")
+
+    def _debug_log(self, message):
+        """Helper method for debug logging"""
+        if self.debug_log:
+            logging.info(f"NumpadMacros Debug: {message}")
+            # Also echo to console for visibility in Mainsail
+            self.gcode.respond_info(f"NumpadMacros Debug: {message}")
+
     def handle_moonraker_connected(self):
         """Called when Moonraker connects"""
-        logging.info("NumpadMacros: Moonraker connected")
+        self._debug_log("Moonraker connected")
         # Send initial configuration to Moonraker
         self.send_status_to_moonraker()
 
@@ -80,17 +91,24 @@ class NumpadMacros:
             status = {
                 'command_mapping': self.command_mapping,
                 'connected': hasattr(self, 'device'),
-                'device_name': self.device.name if hasattr(self, 'device') else None
+                'device_name': self.device.name if hasattr(self, 'device') else None,
+                'debug_enabled': self.debug_log
             }
             self.printer.send_event("numpad:status_update", json.dumps(status))
+            self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
         except Exception as e:
-            logging.error(f"NumpadMacros: Error sending status to Moonraker: {str(e)}")
+            error_msg = f"Error sending status to Moonraker: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
 
     def handle_connect(self):
         """Called when printer connects"""
         try:
             self.device = InputDevice(self.device_path)
-            logging.info(f"NumpadMacros: Connected to device {self.device.name}")
+            connect_msg = f"Connected to device {self.device.name}"
+            logging.info(f"NumpadMacros: {connect_msg}")
+            self._debug_log(connect_msg)
 
             # Start monitoring thread
             self.input_thread = threading.Thread(target=self._monitor_input)
@@ -101,7 +119,10 @@ class NumpadMacros:
             self.send_status_to_moonraker()
 
         except Exception as e:
-            logging.error(f"NumpadMacros: Failed to initialize device: {str(e)}")
+            error_msg = f"Failed to initialize device: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
             raise self.printer.config_error(f"Failed to initialize numpad device: {str(e)}")
 
     def handle_shutdown(self):
@@ -109,6 +130,7 @@ class NumpadMacros:
         self.shutdown = True
         if hasattr(self, 'device'):
             self.device.close()
+        self._debug_log("NumpadMacros shutdown")
 
     def _monitor_input(self):
         """Monitor numpad input in a separate thread"""
@@ -129,35 +151,49 @@ class NumpadMacros:
                             # Schedule the key handling in the main thread
                             self.reactor.register_callback(
                                 lambda e, k=key_value: self._handle_key_press(k))
+                            self._debug_log(f"Key pressed: {key_value} (scancode: {key_code})")
 
         except Exception as e:
-            logging.error(f"NumpadMacros: Error in input monitoring: {str(e)}")
+            error_msg = f"Error in input monitoring: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
 
     def _handle_key_press(self, key):
         """Handle a key press event"""
         try:
             # Notify Moonraker of key press
-            self.printer.send_event("numpad:keypress", json.dumps({
+            press_data = {
                 'key': key,
                 'command': self.command_mapping.get(key, "Unknown")
-            }))
+            }
+            self.printer.send_event("numpad:keypress", json.dumps(press_data))
+
+            # Always show key press in console for user feedback
+            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed")
 
             # Execute mapped command if available
             command = self.command_mapping.get(key)
             if command:
+                self._debug_log(f"Executing command: {command}")
                 self.gcode.run_script_from_command(command)
             else:
-                self.gcode.respond_info(f"No command mapped for key: {key}")
+                self._debug_log(f"No command mapped for key: {key}")
 
         except Exception as e:
-            logging.error(f"NumpadMacros: Error handling key press: {str(e)}")
+            error_msg = f"Error handling key press: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
 
     def cmd_NUMPAD_TEST(self, gcmd):
         """G-code command to test numpad functionality"""
+        self._debug_log("Running NUMPAD_TEST command")
         gcmd.respond_info("NumpadMacros test command received")
         if hasattr(self, 'device'):
             gcmd.respond_info(f"Connected to: {self.device.name}")
             gcmd.respond_info(f"Current command mapping: {json.dumps(self.command_mapping, indent=2)}")
+            gcmd.respond_info(f"Debug logging: {'enabled' if self.debug_log else 'disabled'}")
         else:
             gcmd.respond_info("No numpad device connected")
 
@@ -166,7 +202,8 @@ class NumpadMacros:
         return {
             'command_mapping': self.command_mapping,
             'connected': hasattr(self, 'device'),
-            'device_name': self.device.name if hasattr(self, 'device') else None
+            'device_name': self.device.name if hasattr(self, 'device') else None,
+            'debug_enabled': self.debug_log
         }
 
 
