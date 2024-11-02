@@ -38,7 +38,14 @@ class NumpadMacros:
 
         # Initialize key mappings
         self.key_mapping = self._initialize_key_mapping()
+
+        # Initialize default commands
         self.command_mapping = self._initialize_command_mapping()
+
+        # Override commands from config
+        for key in self.command_mapping.keys():
+            if config.get(key, None) is not None:
+                self.command_mapping[key] = config.get(key)
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
