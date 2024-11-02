@@ -71,7 +71,7 @@ class NumpadMacros:
         return {
             # Regular number keys based on observed codes
             2: "key_1",  # KEY_1
-            3: "2",  # KEY_2
+            3: "key_2",  # KEY_2
             4: "3",  # KEY_3
             5: "4",  # KEY_4
             6: "5",  # KEY_5
@@ -87,7 +87,7 @@ class NumpadMacros:
 
             # Also include evdev constants for compatibility
             evdev.ecodes.KEY_1: "key_1",
-            evdev.ecodes.KEY_2: "2",
+            evdev.ecodes.KEY_2: "key_2",
             evdev.ecodes.KEY_3: "3",
             evdev.ecodes.KEY_4: "4",
             evdev.ecodes.KEY_5: "5",
@@ -106,8 +106,8 @@ class NumpadMacros:
     def _initialize_command_mapping(self) -> Dict[str, str]:
         """Initialize the key to command mapping"""
         return {
-            "1": "HOME",
-            "2": "PROBE_BED_MESH",
+            "key_1": "HOME",
+            "key_2": "PROBE_BED_MESH",
             "3": "Z_TILT_ADJUST",
             "4": "BED_PROBE_MANUAL_ADJUST",
             "5": "TURN_ON_LIGHT",
