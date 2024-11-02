@@ -14,8 +14,7 @@ DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
 
-
-class NumpadMacrosClient:
+class NumpadMacros:
     """
     Klipper plugin for handling multiple input devices and executing mapped commands.
     Supports multiple devices, configurable key mapping, and debug logging.
@@ -310,4 +309,4 @@ class NumpadMacrosClient:
 
 
 def load_config(config):
-    return NumpadMacrosClient(config)
+    return NumpadMacros(config)
