@@ -13,7 +13,7 @@ class NumpadMacros:
         self.shutdown = False
 
         # Get configuration
-        self.device_path = config.get('device_path', '/dev/input/by-id/usb-SIGMACHIP_USB_Keyboard-event-kbd')
+        self.device_path = config.get('device_path', '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd')
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
