@@ -25,7 +25,11 @@ class NumpadMacros:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
 
-        # Configuration
+        # Configuration - Register these options first
+        config.get_name_config_value('device_paths')  # Mark as used
+        config.get_name_config_value('debug_log')  # Mark as used
+
+        # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
         self.device_paths = [path.strip() for path in device_paths]
         self.debug_log = config.getboolean('debug_log', False)
@@ -36,23 +40,17 @@ class NumpadMacros:
         self.devices: Dict[str, InputDevice] = {}
         self.input_threads: Dict[str, threading.Thread] = {}
 
-        # Initialize key mappings
+        # Initialize key mappings and default commands
         self.key_mapping = self._initialize_key_mapping()
-
-        # Initialize default commands
         self.command_mapping = self._initialize_command_mapping()
 
-        # Register valid config options with key_ prefix
-        valid_keys = ['device_paths', 'debug_log']
-        valid_keys.extend([f'key_{key}' for key in self.command_mapping.keys()])
+        # Handle key_ prefix options
+        prefix_options = config.get_prefix_options('key_')
 
-        # Tell Klipper about our valid config options
-        config.get_prefix_options('key_')
-
-        # Override commands from config
+        # Override commands from config using prefix_options
         for key in self.command_mapping.keys():
             config_key = f'key_{key}'
-            if config.get(config_key, None) is not None:
+            if config_key in prefix_options:
                 self.command_mapping[key] = config.get(config_key)
 
         # Register event handlers
