@@ -70,7 +70,7 @@ class NumpadMacros:
         """Initialize the key code to key name mapping"""
         return {
             # Regular number keys based on observed codes
-            2: "1",  # KEY_1
+            2: "key_1",  # KEY_1
             3: "2",  # KEY_2
             4: "3",  # KEY_3
             5: "4",  # KEY_4
@@ -86,7 +86,7 @@ class NumpadMacros:
             115: "UP",  # KEY_VOLUMEUP
 
             # Also include evdev constants for compatibility
-            evdev.ecodes.KEY_1: "1",
+            evdev.ecodes.KEY_1: "key_1",
             evdev.ecodes.KEY_2: "2",
             evdev.ecodes.KEY_3: "3",
             evdev.ecodes.KEY_4: "4",
