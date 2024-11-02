@@ -64,67 +64,6 @@ class NumpadMacros:
 
         self._debug_log("NumpadMacrosClient initialized")
 
-    def _initialize_key_mapping(self) -> Dict[int, str]:
-        """Initialize the key code to key name mapping"""
-        return {
-            # Regular number keys
-            2: "1",  # KEY_1
-            3: "2",  # KEY_2
-            4: "3",  # KEY_3
-            5: "4",  # KEY_4
-            6: "5",  # KEY_5
-            7: "6",  # KEY_6
-            8: "7",  # KEY_7
-            9: "8",  # KEY_8
-            10: "9",  # KEY_9
-            11: "0",  # KEY_0
-
-            # Numpad specific keys
-            79: "1",  # KEY_KP1
-            80: "2",  # KEY_KP2
-            81: "3",  # KEY_KP3
-            75: "4",  # KEY_KP4
-            76: "5",  # KEY_KP5
-            77: "6",  # KEY_KP6
-            71: "7",  # KEY_KP7
-            72: "8",  # KEY_KP8
-            73: "9",  # KEY_KP9
-            82: "0",  # KEY_KP0
-            83: "DOT",  # KEY_KPDOT
-            96: "ENTER",  # KEY_KPENTER
-
-            # Volume knob mappings
-            114: "DOWN",  # KEY_VOLUMEDOWN
-            115: "UP",  # KEY_VOLUMEUP
-
-            # Also include evdev constants for compatibility
-            evdev.ecodes.KEY_1: "1",
-            evdev.ecodes.KEY_2: "2",
-            evdev.ecodes.KEY_3: "3",
-            evdev.ecodes.KEY_4: "4",
-            evdev.ecodes.KEY_5: "5",
-            evdev.ecodes.KEY_6: "6",
-            evdev.ecodes.KEY_7: "7",
-            evdev.ecodes.KEY_8: "8",
-            evdev.ecodes.KEY_9: "9",
-            evdev.ecodes.KEY_0: "0",
-            evdev.ecodes.KEY_KP1: "1",
-            evdev.ecodes.KEY_KP2: "2",
-            evdev.ecodes.KEY_KP3: "3",
-            evdev.ecodes.KEY_KP4: "4",
-            evdev.ecodes.KEY_KP5: "5",
-            evdev.ecodes.KEY_KP6: "6",
-            evdev.ecodes.KEY_KP7: "7",
-            evdev.ecodes.KEY_KP8: "8",
-            evdev.ecodes.KEY_KP9: "9",
-            evdev.ecodes.KEY_KP0: "0",
-            evdev.ecodes.KEY_KPDOT: "DOT",
-            evdev.ecodes.KEY_KPENTER: "ENTER",
-            evdev.ecodes.KEY_DOT: "DOT",
-            evdev.ecodes.KEY_VOLUMEDOWN: "DOWN",
-            evdev.ecodes.KEY_VOLUMEUP: "UP"
-        }
-
     def _monitor_input(self, device_path: str) -> None:
         """Monitor input device with error recovery"""
         device = self.devices.get(device_path)
@@ -144,29 +83,35 @@ class NumpadMacros:
                         # Enhanced debug logging for all key events
                         if self.debug_log:
                             self._debug_log(
-                                f"Key event from {device.name} - "
-                                f"code: {key_event.scancode}, "
-                                f"name: {key_event.keycode}, "
-                                f"type: {event.type}, "
-                                f"value: {event.value}"
+                                f"Raw key event - Code: {event.code}, "
+                                f"Type: {event.type}, Value: {event.value}, "
+                                f"Scancode: {getattr(key_event, 'scancode', 'N/A')}"
                             )
 
-                        # Only process key down events (value = 1)
-                        if event.value == 1:  # Key press down
-                            # Try both the scancode and the raw code
-                            key_value = self.key_mapping.get(key_event.scancode)
+                        # Only process key press events (value = 1)
+                        if event.value == 1:
+                            # First try direct code mapping
+                            key_value = self.key_mapping.get(event.code)
                             if key_value is None:
-                                key_value = self.key_mapping.get(event.code)
+                                # Try scancode if available
+                                key_value = self.key_mapping.get(getattr(key_event, 'scancode', None))
+
+                            if self.debug_log:
+                                self._debug_log(f"Attempted key mapping result: {key_value}")
 
                             if key_value is not None:
-                                self.reactor.register_callback(
-                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                self._debug_log(f"Key mapped and processed: {key_value}")
+                                command = self.command_mapping.get(key_value)
+                                if command:
+                                    if self.debug_log:
+                                        self._debug_log(f"Found command mapping: {key_value} -> {command}")
+                                    self.reactor.register_callback(
+                                        lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                else:
+                                    self._debug_log(f"No command mapped for key: {key_value}")
                             else:
                                 self._debug_log(
-                                    f"Unhandled key from {device.name}: {key_event.keycode} "
-                                    f"(scancode: {key_event.scancode}, "
-                                    f"code: {event.code})"
+                                    f"No key mapping found for code {event.code} "
+                                    f"or scancode {getattr(key_event, 'scancode', 'N/A')}"
                                 )
 
             except (OSError, IOError) as e:
@@ -183,9 +128,51 @@ class NumpadMacros:
                     self._debug_log(f"Error in input monitoring for {device_path}: {str(e)}")
                     time.sleep(DEFAULT_RETRY_DELAY)
 
+    def _initialize_key_mapping(self) -> Dict[int, str]:
+        """Initialize the key code to key name mapping"""
+        mapping = {
+            # Numpad keys (Most common scancodes)
+            79: "1",  # KEY_KP1
+            80: "2",  # KEY_KP2
+            81: "3",  # KEY_KP3
+            75: "4",  # KEY_KP4
+            76: "5",  # KEY_KP5
+            77: "6",  # KEY_KP6
+            71: "7",  # KEY_KP7
+            72: "8",  # KEY_KP8
+            73: "9",  # KEY_KP9
+            82: "0",  # KEY_KP0
+            83: "DOT",  # KEY_KPDOT
+            96: "ENTER",  # KEY_KPENTER
+
+            # Numpad keys (Alternative codes)
+            evdev.ecodes.KEY_KP1: "1",
+            evdev.ecodes.KEY_KP2: "2",
+            evdev.ecodes.KEY_KP3: "3",
+            evdev.ecodes.KEY_KP4: "4",
+            evdev.ecodes.KEY_KP5: "5",
+            evdev.ecodes.KEY_KP6: "6",
+            evdev.ecodes.KEY_KP7: "7",
+            evdev.ecodes.KEY_KP8: "8",
+            evdev.ecodes.KEY_KP9: "9",
+            evdev.ecodes.KEY_KP0: "0",
+            evdev.ecodes.KEY_KPDOT: "DOT",
+            evdev.ecodes.KEY_KPENTER: "ENTER",
+
+            # Volume knob mappings
+            114: "DOWN",  # KEY_VOLUMEDOWN
+            115: "UP",  # KEY_VOLUMEUP
+            evdev.ecodes.KEY_VOLUMEDOWN: "DOWN",
+            evdev.ecodes.KEY_VOLUMEUP: "UP"
+        }
+
+        if self.debug_log:
+            self._debug_log(f"Initialized key mapping: {mapping}")
+        return mapping
+
     def _initialize_command_mapping(self) -> Dict[str, str]:
         """Initialize the key to command mapping"""
-        return {
+        mapping = {
             "1": "HOME",
             "2": "PROBE_BED_MESH",
             "3": "Z_TILT_ADJUST",
@@ -198,9 +185,38 @@ class NumpadMacros:
             "0": "TOGGLE_FILAMENT_SENSOR",
             "DOT": "PROBE_NOZZLE_DISTANCE",
             "ENTER": "RESUME",
-            "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",  # Raise nozzle
-            "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"  # Lower nozzle
+            "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
+            "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
         }
+
+        if self.debug_log:
+            self._debug_log(f"Initialized command mapping: {mapping}")
+        return mapping
+
+    def _handle_key_press(self, key: str, device_name: str) -> None:
+        """Handle key press events and execute mapped commands"""
+        try:
+            if self.debug_log:
+                self._debug_log(f"Handling key press: {key} from {device_name}")
+
+            # Always show key press in console
+            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
+
+            command = self.command_mapping.get(key)
+            if command:
+                self._debug_log(f"Executing command: {command}")
+                try:
+                    self.gcode.run_script_from_command(command)
+                except Exception as cmd_error:
+                    self._debug_log(f"Error executing command: {str(cmd_error)}")
+            else:
+                self._debug_log(f"No command mapped for key: {key}")
+
+        except Exception as e:
+            error_msg = f"Error handling key press: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacrosClient Error: {error_msg}")
 
     def _debug_log(self, message: str) -> None:
         """Log debug messages to both system log and console if debug is enabled"""
