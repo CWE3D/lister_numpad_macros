@@ -42,14 +42,18 @@ class NumpadMacros:
         # Initialize default commands
         self.command_mapping = self._initialize_command_mapping()
 
-        # Register valid config options
-        valid_keys = list(self.command_mapping.keys()) + ['device_paths', 'debug_log']
-        config.get_prefix_options(valid_keys)
+        # Register valid config options with key_ prefix
+        valid_keys = ['device_paths', 'debug_log']
+        valid_keys.extend([f'key_{key}' for key in self.command_mapping.keys()])
+
+        # Tell Klipper about our valid config options
+        config.get_prefix_options('key_')
 
         # Override commands from config
         for key in self.command_mapping.keys():
-            if config.get(key, None) is not None:
-                self.command_mapping[key] = config.get(key)
+            config_key = f'key_{key}'
+            if config.get(config_key, None) is not None:
+                self.command_mapping[key] = config.get(config_key)
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
@@ -70,8 +74,8 @@ class NumpadMacros:
         """Initialize the key code to key name mapping"""
         return {
             # Regular number keys based on observed codes
-            2: "key_1",  # KEY_1
-            3: "key_2",  # KEY_2
+            2: "1",  # KEY_1
+            3: "2",  # KEY_2
             4: "3",  # KEY_3
             5: "4",  # KEY_4
             6: "5",  # KEY_5
@@ -86,8 +90,8 @@ class NumpadMacros:
             115: "UP",  # KEY_VOLUMEUP
 
             # Also include evdev constants for compatibility
-            evdev.ecodes.KEY_1: "key_1",
-            evdev.ecodes.KEY_2: "key_2",
+            evdev.ecodes.KEY_1: "1",
+            evdev.ecodes.KEY_2: "2",
             evdev.ecodes.KEY_3: "3",
             evdev.ecodes.KEY_4: "4",
             evdev.ecodes.KEY_5: "5",
@@ -106,8 +110,8 @@ class NumpadMacros:
     def _initialize_command_mapping(self) -> Dict[str, str]:
         """Initialize the key to command mapping"""
         return {
-            "key_1": "HOME",
-            "key_2": "PROBE_BED_MESH",
+            "1": "HOME",
+            "2": "PROBE_BED_MESH",
             "3": "Z_TILT_ADJUST",
             "4": "BED_PROBE_MANUAL_ADJUST",
             "5": "TURN_ON_LIGHT",
