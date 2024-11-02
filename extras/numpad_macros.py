@@ -42,6 +42,10 @@ class NumpadMacros:
         # Initialize default commands
         self.command_mapping = self._initialize_command_mapping()
 
+        # Register valid config options
+        valid_keys = list(self.command_mapping.keys()) + ['device_paths', 'debug_log']
+        config.get_prefix_options(valid_keys)
+
         # Override commands from config
         for key in self.command_mapping.keys():
             if config.get(key, None) is not None:
