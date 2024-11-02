@@ -18,10 +18,10 @@ MOONRAKER_CONF="/home/pi/printer_data/config/moonraker.conf"
 # Update manager configuration block
 read -r -d '' UPDATE_MANAGER_CONFIG << 'EOL'
 
-[update_manager lister_numpad_macros]
+[update_manager numpad_macros_service]
 type: git_repo
-path: ~/lister_numpad_macros
-origin: https://github.com/CWE3D/lister_numpad_macros.git
+path: ~/numpad_macros_service
+origin: https://github.com/CWE3D/numpad_macros_service.git
 is_system_service: False
 primary_branch: main
 managed_services: klipper moonraker
@@ -193,14 +193,14 @@ setup_moonraker_component() {
         exit 1
     fi
 
-    if [ -f "$COMPONENTS_DIR/numpad_macros.py" ]; then
+    if [ -f "$COMPONENTS_DIR/numpad_macros_service.py" ]; then  # Updated filename
         # Remove existing symlink if it exists
-        if [ -L "$MOONRAKER_COMPONENTS_DIR/numpad_macros.py" ]; then
-            rm "$MOONRAKER_COMPONENTS_DIR/numpad_macros.py"
+        if [ -L "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py" ]; then  # Updated filename
+            rm "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py"
         fi
 
         # Create new symlink
-        if ! ln -s "$COMPONENTS_DIR/numpad_macros.py" "$MOONRAKER_COMPONENTS_DIR/numpad_macros.py"; then
+        if ! ln -s "$COMPONENTS_DIR/numpad_macros_service.py" "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py"; then  # Updated filename
             log_error "Error: Failed to create Moonraker component symlink"
             exit 1
         fi

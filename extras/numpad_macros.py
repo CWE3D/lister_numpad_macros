@@ -15,7 +15,7 @@ DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
 
 
-class NumpadMacros:
+class NumpadMacrosClient:
     """
     Klipper plugin for handling multiple input devices and executing mapped commands.
     Supports multiple devices, configurable key mapping, and debug logging.
@@ -54,7 +54,7 @@ class NumpadMacros:
             desc="Test numpad functionality and display current configuration"
         )
 
-        self._debug_log("NumpadMacros initialized")
+        self._debug_log("NumpadMacrosClient initialized")
 
     def _initialize_key_mapping(self) -> Dict[int, str]:
         """Initialize the key code to key name mapping"""
@@ -115,8 +115,8 @@ class NumpadMacros:
     def _debug_log(self, message: str) -> None:
         """Log debug messages to both system log and console if debug is enabled"""
         if self.debug_log:
-            logging.info(f"NumpadMacros Debug: {message}")
-            self.gcode.respond_info(f"NumpadMacros Debug: {message}")
+            logging.info(f"NumpadMacrosClient Debug: {message}")
+            self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
 
     def handle_connect(self) -> None:
         """Initialize all configured devices with retry mechanism"""
@@ -256,7 +256,7 @@ class NumpadMacros:
             error_msg = f"Error handling key press: {str(e)}"
             logging.error(f"NumpadMacros: {error_msg}")
             if self.debug_log:
-                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                self.gcode.respond_info(f"NumpadMacrosClient Error: {error_msg}")
 
     def send_status_to_moonraker(self) -> None:
         """Send current status to Moonraker"""
@@ -278,7 +278,7 @@ class NumpadMacros:
         self._debug_log("Running NUMPAD_TEST command")
 
         responses = [
-            "NumpadMacros test command received",
+            "NumpadMacrosClient test command received",
             f"Debug logging: {'enabled' if self.debug_log else 'disabled'}"
         ]
 
@@ -310,4 +310,4 @@ class NumpadMacros:
 
 
 def load_config(config):
-    return NumpadMacros(config)
+    return NumpadMacrosClient(config)

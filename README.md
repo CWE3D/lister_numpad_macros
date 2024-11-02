@@ -92,7 +92,7 @@ evtest
 ls -l ~/klipper/klippy/extras/numpad_macros.py
 
 # Check Moonraker component installation
-ls -l ~/moonraker/moonraker/components/numpad_macros.py
+ls -l ~/moonraker/moonraker/components/numpad_macros_service.py
 
 # Check input group membership
 groups | grep input

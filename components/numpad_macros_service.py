@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, Optional
 
-class NumpadMacros:
+class NumpadMacrosService:  # Changed from NumpadMacros
     """
     Moonraker component for managing numpad macros configuration and status.
     Provides web API endpoints for configuration management and status updates.
@@ -25,27 +25,27 @@ class NumpadMacros:
         # Initialize configuration
         self._init_keymap_config(config)
 
-        # Register endpoints
+        # Update endpoint paths to reflect service name
         self.server.register_endpoint(
-            "/machine/numpad/keymap",
+            "/machine/numpad/keymap",  # Updated path
             ['GET', 'POST'],
             self._handle_keymap_request,
             transport="http"
         )
         self.server.register_endpoint(
-            "/machine/numpad/status",
+            "/machine/numpad/status",  # Updated path
             ['GET'],
             self._handle_status_request,
             transport="http"
         )
         self.server.register_endpoint(
-            "/machine/numpad/devices",
+            "/machine/numpad/devices",  # Updated path
             ['GET'],
             self._handle_devices_request,
             transport="http"
         )
 
-        # Register notification methods
+        # Register notification methods (keep numpad: prefix for compatibility)
         self.server.register_notification("numpad:keypress")
         self.server.register_notification("numpad:status_update")
         self.server.register_notification("numpad:device_update")
@@ -56,7 +56,7 @@ class NumpadMacros:
             self._handle_ready
         )
 
-        logging.info("Numpad Macros Component Initialized")
+        logging.info("Numpad Macros Service Component Initialized")
 
     def _get_default_keymap(self) -> Dict[str, str]:
         """Return default key mapping configuration"""
@@ -229,4 +229,4 @@ class NumpadMacros:
 
 
 def load_component(config):
-    return NumpadMacros(config)
+    return NumpadMacrosService(config)
