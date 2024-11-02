@@ -1,13 +1,11 @@
 import logging
 from typing import Dict, Any, Optional
-import json
-import asyncio
-
 
 class NumpadMacros:
     """
     Moonraker component for managing numpad macros configuration and status.
     Provides web API endpoints for configuration management and status updates.
+    Supports multiple devices and additional input types like volume knobs.
     """
 
     def __init__(self, config) -> None:
@@ -17,7 +15,7 @@ class NumpadMacros:
         # Initialize state
         self._status: Dict[str, Any] = {
             'enabled': True,
-            'connected': False,
+            'connected_devices': {},
             'last_keypress': None,
             'last_error': None,
             'config_loaded': False
@@ -40,10 +38,17 @@ class NumpadMacros:
             self._handle_status_request,
             transport="http"
         )
+        self.server.register_endpoint(
+            "/machine/numpad/devices",
+            ['GET'],
+            self._handle_devices_request,
+            transport="http"
+        )
 
         # Register notification methods
         self.server.register_notification("numpad:keypress")
         self.server.register_notification("numpad:status_update")
+        self.server.register_notification("numpad:device_update")
 
         # Register event handlers
         self.server.register_event_handler(
@@ -56,6 +61,7 @@ class NumpadMacros:
     def _get_default_keymap(self) -> Dict[str, str]:
         """Return default key mapping configuration"""
         return {
+            # Standard numpad keys
             "1": "HOME",
             "2": "PROBE_BED_MESH",
             "3": "Z_TILT_ADJUST",
@@ -67,7 +73,10 @@ class NumpadMacros:
             "9": "COLD_CHANGE_FILAMENT",
             "0": "TOGGLE_FILAMENT_SENSOR",
             "DOT": "PROBE_NOZZLE_DISTANCE",
-            "ENTER": "RESUME"
+            "ENTER": "RESUME",
+            # Volume knob controls
+            "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
+            "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
         }
 
     def _init_keymap_config(self, config) -> None:
@@ -103,7 +112,6 @@ class NumpadMacros:
             return False
 
         # Add additional command validation as needed
-        # For example, check for invalid characters or command format
         invalid_chars = set('<>{}[]\\')
         return not any(char in cmd for char in invalid_chars)
 
@@ -111,7 +119,7 @@ class NumpadMacros:
         """Handle Klippy ready event"""
         try:
             logging.info("Numpad Macros Component Ready")
-            await self._update_status(connected=True)
+            await self._update_status(enabled=True)
         except Exception as e:
             logging.error(f"Error in ready handler: {str(e)}")
 
@@ -142,8 +150,6 @@ class NumpadMacros:
             # Update configuration
             self.keymap_config.update(validated_keymap)
             await self._save_keymap()
-
-            # Notify about configuration change
             await self._notify_keymap_update()
 
             return {'keymap': self.keymap_config}
@@ -156,6 +162,12 @@ class NumpadMacros:
         return {
             'status': self._status,
             'keymap': self.keymap_config
+        }
+
+    async def _handle_devices_request(self, web_request) -> Dict[str, Any]:
+        """Return information about connected devices"""
+        return {
+            'devices': self._status['connected_devices']
         }
 
     async def _update_status(self, **kwargs) -> None:
@@ -182,12 +194,22 @@ class NumpadMacros:
         except Exception as e:
             logging.error(f"Error notifying keymap update: {str(e)}")
 
+    async def _handle_device_update(self, device_info: Dict[str, Any]) -> None:
+        """Handle device connection/disconnection updates"""
+        try:
+            self._status['connected_devices'] = device_info
+            await self.server.send_event(
+                "numpad:device_update",
+                {'devices': device_info}
+            )
+        except Exception as e:
+            logging.error(f"Error handling device update: {str(e)}")
+
     async def _save_keymap(self) -> None:
         """Save current keymap configuration"""
-        # This is a placeholder for configuration persistence
-        # Implement actual configuration saving mechanism as needed
         try:
-            # Example: Could save to a config file or database
+            # TODO: Implement actual configuration saving mechanism
+            # Could save to a config file or database
             self._status['config_loaded'] = True
             logging.info("Keymap configuration saved successfully")
         except Exception as e:
@@ -198,8 +220,10 @@ class NumpadMacros:
         """Clean up resources on shutdown"""
         logging.info("Closing Numpad Macros Component")
         try:
-            # Perform any necessary cleanup
-            await self._update_status(connected=False)
+            await self._update_status(
+                enabled=False,
+                connected_devices={}
+            )
         except Exception as e:
             logging.error(f"Error during component shutdown: {str(e)}")
 
