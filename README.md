@@ -151,7 +151,8 @@ key_3: M104 S200           # Set hotend temperature
 Enable debug logging in `printer.cfg`:
 ```ini
 [numpad_macros]
-debug_log: True  # Enable detailed logging
+device_paths: /dev/input/by-id/device1, /dev/input/by-id/device2
+debug_log: True
 ```
 
 ## Updating the Plugin
