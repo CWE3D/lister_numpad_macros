@@ -42,8 +42,6 @@ class NumpadMacros:
 
         # Handle key_ prefix options
         prefix_options = config.get_prefix_options('key_')
-
-        # Override commands from config using prefix_options
         for key in self.command_mapping.keys():
             config_key = f'key_{key}'
             if config_key in prefix_options:
@@ -52,8 +50,7 @@ class NumpadMacros:
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.printer.register_event_handler("klippy:shutdown", self.handle_shutdown)
-        self.printer.register_event_handler('moonraker:connected',
-                                            self.handle_moonraker_connected)
+        self.printer.register_event_handler('moonraker:connected', self.handle_moonraker_connected)
 
         # Register commands
         self.gcode.register_command(
@@ -77,34 +74,36 @@ class NumpadMacros:
                     continue
 
                 for event in device.read():
-                    # Only process EV_KEY events
                     if event.type == evdev.ecodes.EV_KEY:
+                        key_event = categorize(event)
+
+                        # Enhanced debug logging for all key events
                         if self.debug_log:
                             self._debug_log(
-                                f"Processing event - Type: {event.type}, "
-                                f"Code: {event.code}, Value: {event.value}"
+                                f"Key event from {device.name} - "
+                                f"code: {key_event.scancode}, "
+                                f"name: {key_event.keycode}, "
+                                f"type: {event.type}, "
+                                f"value: {event.value}"
                             )
 
-                        # Only process key press (value=1) events
-                        if event.value == 1:
-                            # Map key code directly
-                            key_value = self.key_mapping.get(event.code)
-
-                            if self.debug_log:
-                                self._debug_log(f"Key code {event.code} mapped to: {key_value}")
+                        # Only process key press events
+                        if key_event.keystate == key_event.key_down:
+                            # Try both the scancode and the raw code
+                            key_value = self.key_mapping.get(key_event.scancode)
+                            if key_value is None:
+                                key_value = self.key_mapping.get(event.code)
 
                             if key_value is not None:
-                                command = self.command_mapping.get(key_value)
-                                if command:
-                                    if self.debug_log:
-                                        self._debug_log(f"Executing command: {command} for key {key_value}")
-                                    self.reactor.register_callback(
-                                        lambda e, k=key_value: self._handle_key_press(k, device.name)
-                                    )
-                                else:
-                                    self._debug_log(f"No command mapped for key: {key_value}")
+                                self.reactor.register_callback(
+                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                self._debug_log(f"Key mapped and processed: {key_value}")
                             else:
-                                self._debug_log(f"No mapping found for key code: {event.code}")
+                                self._debug_log(
+                                    f"Unhandled key from {device.name}: {key_event.keycode} "
+                                    f"(scancode: {key_event.scancode}, "
+                                    f"code: {event.code})"
+                                )
 
             except (OSError, IOError) as e:
                 if not self._thread_exit.is_set():
@@ -122,9 +121,8 @@ class NumpadMacros:
 
     def _initialize_key_mapping(self) -> Dict[int, str]:
         """Initialize the key code to key name mapping"""
-        # Define mapping for numeric keypad codes
         mapping = {
-            # Numpad specific keys (based on your evtest output)
+            # Numpad specific keys
             79: "1",  # KEY_KP1
             80: "2",  # KEY_KP2
             81: "3",  # KEY_KP3
@@ -136,41 +134,31 @@ class NumpadMacros:
             73: "9",  # KEY_KP9
             82: "0",  # KEY_KP0
             83: "DOT",  # KEY_KPDOT
-            96: "ENTER"  # KEY_KPENTER
+            96: "ENTER",  # KEY_KPENTER
+
+            # Regular number keys
+            2: "1",  # KEY_1
+            3: "2",  # KEY_2
+            4: "3",  # KEY_3
+            5: "4",  # KEY_4
+            6: "5",  # KEY_5
+            7: "6",  # KEY_6
+            8: "7",  # KEY_7
+            9: "8",  # KEY_8
+            10: "9",  # KEY_9
+            11: "0",  # KEY_0
+            28: "ENTER",  # KEY_ENTER
+            41: "GRAVE"  # KEY_GRAVE
         }
 
         if self.debug_log:
             self._debug_log(f"Initialized key mapping: {mapping}")
         return mapping
 
-    def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events and execute mapped commands"""
-        try:
-            command = self.command_mapping.get(key)
-            if command:
-                if self.debug_log:
-                    self._debug_log(f"Executing command '{command}' for key '{key}'")
-
-                # Execute command in a try-except block
-                try:
-                    self.gcode.run_script_from_command(command)
-                    self.gcode.respond_info(f"NumpadMacros: Executed '{command}' from key '{key}'")
-                except Exception as cmd_error:
-                    error_msg = f"Error executing command '{command}': {str(cmd_error)}"
-                    self._debug_log(error_msg)
-                    self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-            else:
-                self._debug_log(f"No command mapped for key: {key}")
-
-        except Exception as e:
-            error_msg = f"Error in key press handler: {str(e)}"
-            logging.error(f"NumpadMacros: {error_msg}")
-            if self.debug_log:
-                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-
     def _initialize_command_mapping(self) -> Dict[str, str]:
         """Initialize the key to command mapping"""
         mapping = {
+            # Number keys (both regular and numpad)
             "1": "HOME",
             "2": "PROBE_BED_MESH",
             "3": "Z_TILT_ADJUST",
@@ -181,8 +169,13 @@ class NumpadMacros:
             "8": "DISABLE_EXTRUDER_STEPPER",
             "9": "COLD_CHANGE_FILAMENT",
             "0": "TOGGLE_FILAMENT_SENSOR",
+
+            # Special keys
             "DOT": "PROBE_NOZZLE_DISTANCE",
             "ENTER": "RESUME",
+            "GRAVE": "EMERGENCY_STOP",
+
+            # Volume knob controls
             "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
             "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
         }
@@ -194,9 +187,6 @@ class NumpadMacros:
     def _handle_key_press(self, key: str, device_name: str) -> None:
         """Handle key press events and execute mapped commands"""
         try:
-            if self.debug_log:
-                self._debug_log(f"Handling key press: {key} from {device_name}")
-
             # Always show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
@@ -206,15 +196,23 @@ class NumpadMacros:
                 try:
                     self.gcode.run_script_from_command(command)
                 except Exception as cmd_error:
-                    self._debug_log(f"Error executing command: {str(cmd_error)}")
+                    error_msg = f"Error executing command '{command}': {str(cmd_error)}"
+                    self._debug_log(error_msg)
+                    self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
             else:
                 self._debug_log(f"No command mapped for key: {key}")
 
+            # Notify Moonraker
+            self.printer.send_event("numpad:keypress", json.dumps({
+                'key': key,
+                'command': command or "Unknown",
+                'device': device_name
+            }))
         except Exception as e:
             error_msg = f"Error handling key press: {str(e)}"
             logging.error(f"NumpadMacros: {error_msg}")
             if self.debug_log:
-                self.gcode.respond_info(f"NumpadMacrosClient Error: {error_msg}")
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
 
     def _debug_log(self, message: str) -> None:
         """Log debug messages to both system log and console if debug is enabled"""
@@ -232,11 +230,9 @@ class NumpadMacros:
                     self.devices[device_path] = device
                     self._debug_log(f"Connected to device: {device.name}")
 
-                    # Print device capabilities if debug is enabled
                     if self.debug_log:
                         self._log_device_capabilities(device)
 
-                    # Start monitoring thread for this device
                     thread = threading.Thread(
                         target=self._monitor_input,
                         args=(device_path,)
@@ -279,88 +275,6 @@ class NumpadMacros:
         """Handle Moonraker connection event"""
         self._debug_log("Moonraker connected")
         self.send_status_to_moonraker()
-
-    def _monitor_input(self, device_path: str) -> None:
-        """Monitor input device with error recovery"""
-        device = self.devices.get(device_path)
-        if not device:
-            return
-
-        while not self._thread_exit.is_set():
-            try:
-                r, w, x = select.select([device.fileno()], [], [], DEFAULT_READ_TIMEOUT)
-                if not r:
-                    continue
-
-                for event in device.read():
-                    if event.type == evdev.ecodes.EV_KEY:
-                        key_event = categorize(event)
-
-                        # Enhanced debug logging for all key events
-                        if self.debug_log:
-                            self._debug_log(
-                                f"Key event from {device.name} - "
-                                f"code: {key_event.scancode}, "
-                                f"name: {key_event.keycode}, "
-                                f"type: {event.type}, "
-                                f"value: {event.value}"
-                            )
-
-                        if key_event.keystate == key_event.key_down:
-                            # Try both the scancode and the raw code
-                            key_value = self.key_mapping.get(key_event.scancode)
-                            if key_value is None:
-                                key_value = self.key_mapping.get(event.code)
-
-                            if key_value is not None:
-                                self.reactor.register_callback(
-                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                self._debug_log(f"Key mapped and processed: {key_value}")
-                            else:
-                                self._debug_log(
-                                    f"Unhandled key from {device.name}: {key_event.keycode} "
-                                    f"(scancode: {key_event.scancode}, "
-                                    f"code: {event.code})"
-                                )
-
-            except (OSError, IOError) as e:
-                if not self._thread_exit.is_set():
-                    self._debug_log(f"Device read error on {device_path}: {str(e)}, attempting recovery...")
-                    time.sleep(DEFAULT_RETRY_DELAY)
-                    try:
-                        device = InputDevice(device_path)
-                        self.devices[device_path] = device
-                    except Exception:
-                        continue
-            except Exception as e:
-                if not self._thread_exit.is_set():
-                    self._debug_log(f"Error in input monitoring for {device_path}: {str(e)}")
-                    time.sleep(DEFAULT_RETRY_DELAY)
-
-    def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events and execute mapped commands"""
-        try:
-            # Always show key press in console
-            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
-
-            command = self.command_mapping.get(key)
-            if command:
-                self._debug_log(f"Executing command: {command}")
-                self.gcode.run_script_from_command(command)
-            else:
-                self._debug_log(f"No command mapped for key: {key}")
-
-            # Notify Moonraker
-            self.printer.send_event("numpad:keypress", json.dumps({
-                'key': key,
-                'command': command or "Unknown",
-                'device': device_name
-            }))
-        except Exception as e:
-            error_msg = f"Error handling key press: {str(e)}"
-            logging.error(f"NumpadMacros: {error_msg}")
-            if self.debug_log:
-                self.gcode.respond_info(f"NumpadMacrosClient Error: {error_msg}")
 
     def send_status_to_moonraker(self) -> None:
         """Send current status to Moonraker"""
