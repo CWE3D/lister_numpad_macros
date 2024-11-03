@@ -179,10 +179,13 @@ class NumpadMacros:
             "9": "COLD_CHANGE_FILAMENT",
             "0": "TOGGLE_FILAMENT_SENSOR",
 
-            # Special keys
+            # Special keys - add lowercase variants
             "DOT": "PROBE_NOZZLE_DISTANCE",
+            "dot": "PROBE_NOZZLE_DISTANCE",  # Add lowercase variant
             "ENTER": "RESUME",
+            "enter": "RESUME",  # Add lowercase variant
             "GRAVE": "EMERGENCY_STOP",
+            "grave": "EMERGENCY_STOP",  # Add lowercase variant
 
             # Volume knob controls
             "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
