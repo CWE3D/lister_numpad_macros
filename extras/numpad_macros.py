@@ -8,11 +8,12 @@ import time
 import select
 from typing import Dict, Optional, Any, Union, List
 
-# Constants unchanged...
+# Constants
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
+
 
 class NumpadMacros:
     def __init__(self, config) -> None:
@@ -28,7 +29,7 @@ class NumpadMacros:
         # Add pending key tracking
         self.pending_key: Optional[str] = None
 
-        # Rest of initialization remains the same...
+        # State management
         self._is_shutdown = False
         self._thread_exit = threading.Event()
         self.devices: Dict[str, InputDevice] = {}
@@ -59,46 +60,63 @@ class NumpadMacros:
 
         self._debug_log("NumpadMacrosClient initialized")
 
-    def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events with ENTER confirmation"""
-        try:
-            # Show key press in console
-            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
+    def _monitor_input(self, device_path: str) -> None:
+        """Monitor input device with error recovery"""
+        device = self.devices.get(device_path)
+        if not device:
+            return
 
-            if key == "ENTER":
-                # Execute pending command if there is one
-                if self.pending_key:
-                    command = self.command_mapping.get(self.pending_key)
-                    if command:
-                        self._debug_log(f"Executing command: {command}")
-                        try:
-                            self.gcode.run_script_from_command(command)
-                        except Exception as cmd_error:
-                            error_msg = f"Error executing command '{command}': {str(cmd_error)}"
-                            self._debug_log(error_msg)
-                            self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-                    else:
-                        self._debug_log(f"No command mapped for key: {self.pending_key}")
+        while not self._thread_exit.is_set():
+            try:
+                r, w, x = select.select([device.fileno()], [], [], DEFAULT_READ_TIMEOUT)
+                if not r:
+                    continue
 
-                    # Clear pending key after execution
-                    self.pending_key = None
-            else:
-                # Store new pending key, overwriting any existing one
-                self.pending_key = key
-                self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
+                for event in device.read():
+                    if event.type == evdev.ecodes.EV_KEY:
+                        key_event = categorize(event)
 
-            # Notify Moonraker of the keypress
-            self.printer.send_event("numpad:keypress", json.dumps({
-                'key': key,
-                'pending_key': self.pending_key,
-                'device': device_name
-            }))
+                        # Enhanced debug logging for all key events
+                        if self.debug_log:
+                            self._debug_log(
+                                f"Key event from {device.name} - "
+                                f"code: {key_event.scancode}, "
+                                f"name: {key_event.keycode}, "
+                                f"type: {event.type}, "
+                                f"value: {event.value}"
+                            )
 
-        except Exception as e:
-            error_msg = f"Error handling key press: {str(e)}"
-            logging.error(f"NumpadMacros: {error_msg}")
-            if self.debug_log:
-                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                        # Only process key press events
+                        if key_event.keystate == key_event.key_down:
+                            # Try both the scancode and the raw code
+                            key_value = self.key_mapping.get(key_event.scancode)
+                            if key_value is None:
+                                key_value = self.key_mapping.get(event.code)
+
+                            if key_value is not None:
+                                self.reactor.register_callback(
+                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                self._debug_log(f"Key mapped and processed: {key_value}")
+                            else:
+                                self._debug_log(
+                                    f"Unhandled key from {device.name}: {key_event.keycode} "
+                                    f"(scancode: {key_event.scancode}, "
+                                    f"code: {event.code})"
+                                )
+
+            except (OSError, IOError) as e:
+                if not self._thread_exit.is_set():
+                    self._debug_log(f"Device read error on {device_path}: {str(e)}, attempting recovery...")
+                    time.sleep(DEFAULT_RETRY_DELAY)
+                    try:
+                        device = InputDevice(device_path)
+                        self.devices[device_path] = device
+                    except Exception:
+                        continue
+            except Exception as e:
+                if not self._thread_exit.is_set():
+                    self._debug_log(f"Error in input monitoring for {device_path}: {str(e)}")
+                    time.sleep(DEFAULT_RETRY_DELAY)
 
     def _initialize_key_mapping(self) -> Dict[int, str]:
         """Initialize the key code to key name mapping"""
@@ -166,40 +184,45 @@ class NumpadMacros:
         return mapping
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events and execute mapped commands"""
+        """Handle key press events with ENTER confirmation"""
         try:
-            # Always show key press in console
+            # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-            command = self.command_mapping.get(key)
-            if command:
-                self._debug_log(f"Executing command: {command}")
-                try:
-                    self.gcode.run_script_from_command(command)
-                except Exception as cmd_error:
-                    error_msg = f"Error executing command '{command}': {str(cmd_error)}"
-                    self._debug_log(error_msg)
-                    self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-            else:
-                self._debug_log(f"No command mapped for key: {key}")
+            if key == "ENTER":
+                # Execute pending command if there is one
+                if self.pending_key:
+                    command = self.command_mapping.get(self.pending_key)
+                    if command:
+                        self._debug_log(f"Executing command: {command}")
+                        try:
+                            self.gcode.run_script_from_command(command)
+                        except Exception as cmd_error:
+                            error_msg = f"Error executing command '{command}': {str(cmd_error)}"
+                            self._debug_log(error_msg)
+                            self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                    else:
+                        self._debug_log(f"No command mapped for key: {self.pending_key}")
 
-            # Notify Moonraker
+                    # Clear pending key after execution
+                    self.pending_key = None
+            else:
+                # Store new pending key, overwriting any existing one
+                self.pending_key = key
+                self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
+
+            # Notify Moonraker of the keypress
             self.printer.send_event("numpad:keypress", json.dumps({
                 'key': key,
-                'command': command or "Unknown",
+                'pending_key': self.pending_key,
                 'device': device_name
             }))
+
         except Exception as e:
             error_msg = f"Error handling key press: {str(e)}"
             logging.error(f"NumpadMacros: {error_msg}")
             if self.debug_log:
                 self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-
-    def _debug_log(self, message: str) -> None:
-        """Log debug messages to both system log and console if debug is enabled"""
-        if self.debug_log:
-            logging.info(f"NumpadMacrosClient Debug: {message}")
-            self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
 
     def handle_connect(self) -> None:
         """Initialize all configured devices with retry mechanism"""
@@ -265,7 +288,8 @@ class NumpadMacros:
                 'connected_devices': {
                     path: device.name for path, device in self.devices.items()
                 },
-                'debug_enabled': self.debug_log
+                'debug_enabled': self.debug_log,
+                'pending_key': self.pending_key  # Added pending key to status
             }
             self.printer.send_event("numpad:status_update", json.dumps(status))
             self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
@@ -278,7 +302,8 @@ class NumpadMacros:
 
         responses = [
             "NumpadMacrosClient test command received",
-            f"Debug logging: {'enabled' if self.debug_log else 'disabled'}"
+            f"Debug logging: {'enabled' if self.debug_log else 'disabled'}",
+            f"Pending key: {self.pending_key or 'None'}"  # Added pending key info
         ]
 
         if self.devices:
@@ -304,7 +329,8 @@ class NumpadMacros:
             'connected_devices': {
                 path: device.name for path, device in self.devices.items()
             },
-            'debug_enabled': self.debug_log
+            'debug_enabled': self.debug_log,
+            'pending_key': self.pending_key  # Added pending key to status
         }
 
 
