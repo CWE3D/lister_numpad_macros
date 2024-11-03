@@ -8,18 +8,13 @@ import time
 import select
 from typing import Dict, Optional, Any, Union, List
 
-# Constants
+# Constants unchanged...
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
 
 class NumpadMacros:
-    """
-    Klipper plugin for handling multiple input devices and executing mapped commands.
-    Supports multiple devices, configurable key mapping, and debug logging.
-    """
-
     def __init__(self, config) -> None:
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
@@ -30,7 +25,10 @@ class NumpadMacros:
         self.device_paths = [path.strip() for path in device_paths]
         self.debug_log = config.getboolean('debug_log', False)
 
-        # State management
+        # Add pending key tracking
+        self.pending_key: Optional[str] = None
+
+        # Rest of initialization remains the same...
         self._is_shutdown = False
         self._thread_exit = threading.Event()
         self.devices: Dict[str, InputDevice] = {}
@@ -61,63 +59,46 @@ class NumpadMacros:
 
         self._debug_log("NumpadMacrosClient initialized")
 
-    def _monitor_input(self, device_path: str) -> None:
-        """Monitor input device with error recovery"""
-        device = self.devices.get(device_path)
-        if not device:
-            return
+    def _handle_key_press(self, key: str, device_name: str) -> None:
+        """Handle key press events with ENTER confirmation"""
+        try:
+            # Show key press in console
+            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-        while not self._thread_exit.is_set():
-            try:
-                r, w, x = select.select([device.fileno()], [], [], DEFAULT_READ_TIMEOUT)
-                if not r:
-                    continue
+            if key == "ENTER":
+                # Execute pending command if there is one
+                if self.pending_key:
+                    command = self.command_mapping.get(self.pending_key)
+                    if command:
+                        self._debug_log(f"Executing command: {command}")
+                        try:
+                            self.gcode.run_script_from_command(command)
+                        except Exception as cmd_error:
+                            error_msg = f"Error executing command '{command}': {str(cmd_error)}"
+                            self._debug_log(error_msg)
+                            self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                    else:
+                        self._debug_log(f"No command mapped for key: {self.pending_key}")
 
-                for event in device.read():
-                    if event.type == evdev.ecodes.EV_KEY:
-                        key_event = categorize(event)
+                    # Clear pending key after execution
+                    self.pending_key = None
+            else:
+                # Store new pending key, overwriting any existing one
+                self.pending_key = key
+                self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
 
-                        # Enhanced debug logging for all key events
-                        if self.debug_log:
-                            self._debug_log(
-                                f"Key event from {device.name} - "
-                                f"code: {key_event.scancode}, "
-                                f"name: {key_event.keycode}, "
-                                f"type: {event.type}, "
-                                f"value: {event.value}"
-                            )
+            # Notify Moonraker of the keypress
+            self.printer.send_event("numpad:keypress", json.dumps({
+                'key': key,
+                'pending_key': self.pending_key,
+                'device': device_name
+            }))
 
-                        # Only process key press events
-                        if key_event.keystate == key_event.key_down:
-                            # Try both the scancode and the raw code
-                            key_value = self.key_mapping.get(key_event.scancode)
-                            if key_value is None:
-                                key_value = self.key_mapping.get(event.code)
-
-                            if key_value is not None:
-                                self.reactor.register_callback(
-                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                self._debug_log(f"Key mapped and processed: {key_value}")
-                            else:
-                                self._debug_log(
-                                    f"Unhandled key from {device.name}: {key_event.keycode} "
-                                    f"(scancode: {key_event.scancode}, "
-                                    f"code: {event.code})"
-                                )
-
-            except (OSError, IOError) as e:
-                if not self._thread_exit.is_set():
-                    self._debug_log(f"Device read error on {device_path}: {str(e)}, attempting recovery...")
-                    time.sleep(DEFAULT_RETRY_DELAY)
-                    try:
-                        device = InputDevice(device_path)
-                        self.devices[device_path] = device
-                    except Exception:
-                        continue
-            except Exception as e:
-                if not self._thread_exit.is_set():
-                    self._debug_log(f"Error in input monitoring for {device_path}: {str(e)}")
-                    time.sleep(DEFAULT_RETRY_DELAY)
+        except Exception as e:
+            error_msg = f"Error handling key press: {str(e)}"
+            logging.error(f"NumpadMacros: {error_msg}")
+            if self.debug_log:
+                self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
 
     def _initialize_key_mapping(self) -> Dict[int, str]:
         """Initialize the key code to key name mapping"""
