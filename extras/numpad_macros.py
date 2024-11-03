@@ -17,6 +17,17 @@ DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev
 
 class NumpadMacros:
     def __init__(self, config) -> None:
+        # Define debug_log method first
+        def _debug_log(self, message: str) -> None:
+            """Log debug messages to both system log and console if debug is enabled"""
+            if self.debug_log:
+                logging.info(f"NumpadMacrosClient Debug: {message}")
+                self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
+
+        # Add the method to the instance
+        self._debug_log = _debug_log.__get__(self)
+
+        # Initialize basic objects
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
