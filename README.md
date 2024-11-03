@@ -1,7 +1,57 @@
-# Numpad Macros Plugin Documentation
+# Numpad Macros Plugin for Klipper
 
 ## Overview
-The Numpad Macros plugin enables you to use USB input devices (numpads, knobs, etc.) as control interfaces for your Lister 3D printer. This plugin provides customizable key mappings to execute common printer commands, making printer control more convenient and efficient.
+The Numpad Macros plugin enables you to use USB input devices (numpads, knobs, etc.) as control interfaces for your Klipper-powered 3D printer. This plugin provides customizable key mappings to execute common printer commands, making printer control more convenient and efficient.
+
+## How It Works
+
+### Architecture
+The plugin consists of two main components that work together:
+
+1. **Klipper Plugin (numpad_macros.py)**
+   - Handles direct input device interaction
+   - Processes key events
+   - Executes mapped commands
+   - Sends status updates to Moonraker
+
+2. **Moonraker Component (numpad_macros_service.py)**
+   - Provides web API endpoints
+   - Handles configuration management
+   - Enables real-time status updates
+   - Facilitates integration with front-end clients
+
+### Communication Flow
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Moonraker
+    participant KlipperPlugin
+    participant InputDevice
+
+    Note over Moonraker,KlipperPlugin: Initial Setup
+    Moonraker->>KlipperPlugin: moonraker:connected event
+    KlipperPlugin->>Moonraker: send initial status
+    
+    Note over InputDevice,Moonraker: Runtime Operation
+    InputDevice->>KlipperPlugin: Key Press
+    KlipperPlugin->>KlipperPlugin: Execute Command
+    KlipperPlugin->>Moonraker: numpad:keypress event
+    
+    Note over Client,Moonraker: API Access
+    Client->>Moonraker: GET /machine/numpad/status
+    Moonraker->>Client: Return current status
+    Client->>Moonraker: POST /machine/numpad/keymap
+    Moonraker->>KlipperPlugin: Update keymap
+    KlipperPlugin->>Moonraker: numpad:status_update event
+```
+
+### Key Features
+- Support for both numpad and regular number keys
+- Multiple device support
+- Customizable key mappings
+- Real-time status updates
+- Error recovery and reconnection
+- Comprehensive debugging capabilities
 
 ## Installation
 
@@ -10,39 +60,26 @@ The Numpad Macros plugin enables you to use USB input devices (numpads, knobs, e
 - Moonraker installed and configured
 - USB input devices (numpad, volume knob, etc.)
 - Python 3.7 or higher
-- python3-evdev package installed
+- python3-evdev package
 
 ### Automatic Installation
 1. Clone the repository:
 ```bash
 cd ~
-git clone https://github.com/CWE3D/lister_numpad_macros.git
+git clone https://github.com/your-username/numpad_macros.git
 ```
 
 2. Run the installation script:
 ```bash
-cd ~/lister_numpad_macros
+cd ~/numpad_macros
 chmod +x install.sh
 ./install.sh
 ```
 
-### Configuration
+## Configuration
 
-#### 1. Moonraker Configuration
-The installation script automatically adds the following to your `moonraker.conf`:
-```ini
-[update_manager lister_numpad_macros]
-type: git_repo
-path: ~/lister_numpad_macros
-origin: https://github.com/CWE3D/lister_numpad_macros.git
-is_system_service: False
-primary_branch: main
-managed_services: klipper moonraker
-install_script: install.sh
-```
-
-#### 2. Printer Configuration
-Add the following to your `printer.cfg`:
+### Printer Configuration
+Add to your `printer.cfg`:
 ```ini
 [numpad_macros]
 # Multiple device support (comma-separated)
@@ -51,8 +88,8 @@ device_paths: /dev/input/by-id/device1, /dev/input/by-id/device2
 # Enable debug logging for troubleshooting
 debug_log: True
 
-# Optional: Key mappings
-key_1: HOME                    # G28
+# Key mappings
+key_1: HOME                    # G28 (Both numpad and regular 1)
 key_2: PROBE_BED_MESH         # Generate bed mesh
 key_3: Z_TILT_ADJUST          # Adjust Z tilt
 key_4: BED_PROBE_MANUAL_ADJUST # Manual bed adjustment
@@ -64,11 +101,18 @@ key_9: COLD_CHANGE_FILAMENT   # Change filament
 key_0: TOGGLE_FILAMENT_SENSOR # Toggle filament sensor
 key_DOT: PROBE_NOZZLE_DISTANCE # Probe calibration
 key_ENTER: RESUME             # Resume print
-
-# Volume knob mappings
-key_UP: SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1    # Raise nozzle
-key_DOWN: SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1  # Lower nozzle
+key_GRAVE: EMERGENCY_STOP     # Emergency stop
 ```
+
+### Supported Keys
+| Physical Key | Plugin Key Name | Default Command |
+|-------------|----------------|-----------------|
+| 1 or KP1    | key_1         | HOME           |
+| 2 or KP2    | key_2         | PROBE_BED_MESH |
+| ...         | ...           | ...            |
+| . or KP_DOT | key_DOT       | PROBE_NOZZLE_DISTANCE |
+| Enter       | key_ENTER     | RESUME         |
+| `           | key_GRAVE     | EMERGENCY_STOP |
 
 ## Finding Your Device Paths
 
@@ -77,108 +121,59 @@ key_DOWN: SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1  # Lower nozzle
 ls -l /dev/input/by-id/
 ```
 
-2. To see detailed device information and supported events:
+2. Get detailed device information:
 ```bash
 evtest
 ```
 
-3. Update the `device_paths` in your `printer.cfg` with your device paths
+## API Endpoints
 
-## Testing the Installation
+Moonraker exposes the following HTTP endpoints:
 
-### 1. Verify Components
-```bash
-# Check Klipper plugin installation
-ls -l ~/klipper/klippy/extras/numpad_macros.py
+- `GET /machine/numpad/status` - Get current status
+- `GET /machine/numpad/keymap` - Get current keymap
+- `POST /machine/numpad/keymap` - Update keymap
+- `GET /machine/numpad/devices` - List connected devices
 
-# Check Moonraker component installation
-ls -l ~/moonraker/moonraker/components/numpad_macros_service.py
+## Debugging
 
-# Check input group membership
-groups | grep input
+### Enable Debug Logging
+```ini
+[numpad_macros]
+debug_log: True
 ```
 
-### 2. Test Basic Functionality
-1. Enable debug logging and send a test command:
+### Test Command
 ```bash
 NUMPAD_TEST
 ```
+
 This will show:
 - Connected devices
 - Current key mappings
 - Debug status
 
-2. Press keys or use input devices:
-- Each input should generate a message in the console
-- Debug logging will show detailed event information
-- You should see command execution confirmations
-
-## Advanced Features
-
-### Device Support
-The plugin now supports multiple input devices:
-- Standard numpads
-- Volume knobs (sends UP/DOWN events)
-- Other USB input devices that send key events
-
-### Debug Logging
-Enable detailed logging to troubleshoot issues:
-```ini
-[numpad_macros]
-debug_log: True
-```
-This will show:
-- Device connection details
-- Key event information
-- Command execution details
-- Error messages
-
-### Custom Key Mappings
-Map any key event to any Klipper command:
-```ini
-[numpad_macros]
-# Z-offset adjustment examples
-key_UP: SET_GCODE_OFFSET Z_ADJUST=0.1 MOVE=1     # Larger increment
-key_DOWN: SET_GCODE_OFFSET Z_ADJUST=-0.1 MOVE=1  # Larger decrement
-
-# Custom command examples
-key_1: G28                  # Home all axes
-key_2: G1 Z10              # Move Z up 10mm
-key_3: M104 S200           # Set hotend temperature
-```
-
-## Default Key Mappings Reference
-
-| Key    | Default Command           | Description                    |
-|--------|--------------------------|--------------------------------|
-| 1-9, 0 | Various printer commands | Standard numpad keys           |
-| .      | PROBE_NOZZLE_DISTANCE   | Probe calibration              |
-| ENTER  | RESUME                  | Resume print                   |
-| UP     | Z offset +0.025         | Raise nozzle (volume knob)     |
-| DOWN   | Z offset -0.025         | Lower nozzle (volume knob)     |
-
-## Troubleshooting
-
 ### Common Issues
 
 1. **Device Not Found**
    - Check USB connections
-   - Verify device paths with `ls -l /dev/input/by-id/`
-   - Check device events with `evtest`
-   - Verify user permissions with `groups | grep input`
+   - Verify device paths
+   - Check user permissions
 
 2. **Keys Not Responding**
    - Enable debug logging
-   - Check Klipper logs: `tail -f /tmp/klippy.log`
-   - Verify device detection: `NUMPAD_TEST`
-   - Try reconnecting the device
+   - Check Klipper logs
+   - Verify device detection
 
-3. **Commands Not Executing**
-   - Check command mapping in `printer.cfg`
-   - Verify command exists in Klipper
-   - Check debug logs for errors
+3. **Permission Issues**
+   - Verify input group membership
+   - Log out and back in after installation
+   - Check device permissions
 
-## Support and Contributing
+## Contributing
 - Report issues on GitHub
 - Submit pull requests for improvements
 - Check documentation for updates
+
+## License
+[Your License Here]
