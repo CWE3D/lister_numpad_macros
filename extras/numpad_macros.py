@@ -17,20 +17,8 @@ DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev
 
 class NumpadMacros:
     def __init__(self, config) -> None:
-        # Define debug_log method first
-        def _debug_log(self, message: str) -> None:
-            """Log debug messages to both system log and console if debug is enabled"""
-            if self.debug_log:
-                logging.info(f"NumpadMacrosClient Debug: {message}")
-                self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
-
-        # Add the method to the instance
-        self._debug_log = _debug_log.__get__(self)
-
-        # Store config and configfile for later use
-        self.config = config
+        # Initialize basic objects
         self.printer = config.get_printer()
-        self.configfile = self.printer.lookup_object('configfile')
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
 
@@ -39,7 +27,7 @@ class NumpadMacros:
         self.device_paths = [path.strip() for path in device_paths]
         self.debug_log = config.getboolean('debug_log', False)
 
-        # Register key configuration options
+        # Define key options
         self.key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
             'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
@@ -49,10 +37,13 @@ class NumpadMacros:
             'key_dot_alt', 'key_enter_alt'
         ]
 
-        # Register each key option
+        # Initialize command mapping
+        self.command_mapping = {}
         for key in self.key_options:
-            # Use raw config access for registration
-            config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
+            self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
+
+        # Initialize key mapping
+        self.key_mapping = self._initialize_key_mapping()
 
         # Add pending key tracking
         self.pending_key: Optional[str] = None
@@ -62,10 +53,6 @@ class NumpadMacros:
         self._thread_exit = threading.Event()
         self.devices: Dict[str, InputDevice] = {}
         self.input_threads: Dict[str, threading.Thread] = {}
-
-        # Initialize key mappings and default commands
-        self.key_mapping = self._initialize_key_mapping()
-        self.command_mapping = self._initialize_command_mapping()
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
@@ -79,21 +66,43 @@ class NumpadMacros:
             desc="Test numpad functionality and display current configuration"
         )
 
-        self._debug_log("NumpadMacrosClient initialized")
-
-    def _initialize_command_mapping(self) -> Dict[str, str]:
-        """Initialize the key to command mapping using configfile"""
-        mapping = {}
-
-        # Get commands from config using configfile object
-        for key in self.key_options:
-            # Get the command from the current config section
-            command = self.configfile.getconfig('numpad_macros').get(key,
-                                                                     f"RESPOND MSG=\"{key} not assigned yet\"")
-            mapping[key] = command
-
+    def _debug_log(self, message: str) -> None:
+        """Log debug messages to both system log and console if debug is enabled"""
         if self.debug_log:
-            self._debug_log(f"Initialized command mapping: {mapping}")
+            logging.info(f"NumpadMacrosClient Debug: {message}")
+            self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
+
+    def _initialize_key_mapping(self) -> Dict[int, str]:
+        """Initialize the key code to key name mapping"""
+        mapping = {
+            # Numpad specific keys
+            79: "key_1",  # KEY_KP1
+            80: "key_2",  # KEY_KP2
+            81: "key_3",  # KEY_KP3
+            75: "key_4",  # KEY_KP4
+            76: "key_5",  # KEY_KP5
+            77: "key_6",  # KEY_KP6
+            71: "key_7",  # KEY_KP7
+            72: "key_8",  # KEY_KP8
+            73: "key_9",  # KEY_KP9
+            82: "key_0",  # KEY_KP0
+            83: "key_dot",  # KEY_KPDOT
+            96: "key_enter",  # KEY_KPENTER
+
+            # Regular number keys (for alt mode)
+            2: "key_1_alt",  # KEY_1
+            3: "key_2_alt",  # KEY_2
+            4: "key_3_alt",  # KEY_3
+            5: "key_4_alt",  # KEY_4
+            6: "key_5_alt",  # KEY_5
+            7: "key_6_alt",  # KEY_6
+            8: "key_7_alt",  # KEY_7
+            9: "key_8_alt",  # KEY_8
+            10: "key_9_alt",  # KEY_9
+            11: "key_0_alt",  # KEY_0
+            28: "key_enter_alt",  # KEY_ENTER
+            41: "key_dot_alt",  # KEY_GRAVE
+        }
         return mapping
 
     def _monitor_input(self, device_path: str) -> None:
@@ -154,52 +163,14 @@ class NumpadMacros:
                     self._debug_log(f"Error in input monitoring for {device_path}: {str(e)}")
                     time.sleep(DEFAULT_RETRY_DELAY)
 
-    def _initialize_key_mapping(self) -> Dict[int, str]:
-        """Initialize the key code to key name mapping"""
-        mapping = {
-            # Numpad specific keys
-            79: "key_1",  # KEY_KP1
-            80: "key_2",  # KEY_KP2
-            81: "key_3",  # KEY_KP3
-            75: "key_4",  # KEY_KP4
-            76: "key_5",  # KEY_KP5
-            77: "key_6",  # KEY_KP6
-            71: "key_7",  # KEY_KP7
-            72: "key_8",  # KEY_KP8
-            73: "key_9",  # KEY_KP9
-            82: "key_0",  # KEY_KP0
-            83: "key_dot",  # KEY_KPDOT
-            96: "key_enter",  # KEY_KPENTER
-            114: "key_up",
-            115: "key_down",
-
-            # Regular number keys
-            # This is for the alternative mode (volume button press)
-            2: "key_1_alt",  # KEY_1
-            3: "key_2_alt",  # KEY_2
-            4: "key_3_alt",  # KEY_3
-            5: "key_4_alt",  # KEY_4
-            6: "key_5_alt",  # KEY_5
-            7: "key_6_alt",  # KEY_6
-            8: "key_7_alt",  # KEY_7
-            9: "key_8_alt",  # KEY_8
-            10: "key_9_alt",  # KEY_9
-            11: "key_0_alt",  # KEY_0
-            28: "key_enter_alt",  # KEY_ENTER
-            41: "key_dot_alt",  # KEY_GRAVE
-        }
-
-        if self.debug_log:
-            self._debug_log(f"Initialized key mapping: {mapping}")
-        return mapping
-
     def _handle_key_press(self, key: str, device_name: str) -> None:
         """Handle key press events with ENTER confirmation"""
         try:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-            if key == "ENTER":
+            # Check if this is an ENTER key press
+            if key in ["key_enter", "key_enter_alt"]:
                 # Execute pending command if there is one
                 if self.pending_key:
                     command = self.command_mapping.get(self.pending_key)
@@ -214,8 +185,10 @@ class NumpadMacros:
                     else:
                         self._debug_log(f"No command mapped for key: {self.pending_key}")
 
-                    # Clear pending key after execution
+                    # Clear pending key after execution or error
                     self.pending_key = None
+                else:
+                    self._debug_log("No pending key to execute")
             else:
                 # Store new pending key, overwriting any existing one
                 self.pending_key = key
@@ -299,7 +272,7 @@ class NumpadMacros:
                     path: device.name for path, device in self.devices.items()
                 },
                 'debug_enabled': self.debug_log,
-                'pending_key': self.pending_key  # Added pending key to status
+                'pending_key': self.pending_key
             }
             self.printer.send_event("numpad:status_update", json.dumps(status))
             self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
@@ -313,7 +286,7 @@ class NumpadMacros:
         responses = [
             "NumpadMacrosClient test command received",
             f"Debug logging: {'enabled' if self.debug_log else 'disabled'}",
-            f"Pending key: {self.pending_key or 'None'}"  # Added pending key info
+            f"Pending key: {self.pending_key or 'None'}"
         ]
 
         if self.devices:
@@ -340,7 +313,7 @@ class NumpadMacros:
                 path: device.name for path, device in self.devices.items()
             },
             'debug_enabled': self.debug_log,
-            'pending_key': self.pending_key  # Added pending key to status
+            'pending_key': self.pending_key
         }
 
 
