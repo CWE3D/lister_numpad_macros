@@ -27,11 +27,10 @@ class NumpadMacros:
         # Add the method to the instance
         self._debug_log = _debug_log.__get__(self)
 
-        # Store config for later use
+        # Store config and configfile for later use
         self.config = config
-
-        # Initialize basic objects
         self.printer = config.get_printer()
+        self.configfile = self.printer.lookup_object('configfile')
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
 
@@ -52,6 +51,7 @@ class NumpadMacros:
 
         # Register each key option
         for key in self.key_options:
+            # Use raw config access for registration
             config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
 
         # Add pending key tracking
@@ -82,12 +82,14 @@ class NumpadMacros:
         self._debug_log("NumpadMacrosClient initialized")
 
     def _initialize_command_mapping(self) -> Dict[str, str]:
-        """Initialize the key to command mapping using stored config"""
+        """Initialize the key to command mapping using configfile"""
         mapping = {}
 
-        # Get commands from stored config object
+        # Get commands from config using configfile object
         for key in self.key_options:
-            command = self.config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
+            # Get the command from the current config section
+            command = self.configfile.getconfig('numpad_macros').get(key,
+                                                                     f"RESPOND MSG=\"{key} not assigned yet\"")
             mapping[key] = command
 
         if self.debug_log:
