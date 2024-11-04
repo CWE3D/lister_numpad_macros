@@ -68,7 +68,7 @@ class NumpadMacros:
             'key_up': 0.0,
             'key_down': 0.0
         }
-        self.knob_debounce_delay = config.getfloat('knob_debounce_delay', 0.1)  # 100ms default
+        self.knob_debounce_delay = config.getfloat('knob_debounce_delay', 0.3)  # 100ms default
 
         # Initialize command mapping
         self.command_mapping = {}
