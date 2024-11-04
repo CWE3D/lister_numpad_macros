@@ -198,6 +198,11 @@ class NumpadMacros:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
+            # Special handling for ENTER key
+            if key in ["key_enter", "key_enter_alt"]:
+                self.gcode.run_script_from_command("_HANDLE_KNOB_INPUT DIRECTION=enter")
+                return
+
             # Check if this key needs confirmation
             if key in self.no_confirm_keys:
                 # Execute immediately without waiting for ENTER
