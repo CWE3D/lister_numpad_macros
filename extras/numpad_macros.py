@@ -14,6 +14,7 @@ DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
 
+
 class NumpadMacros:
     def __init__(self, config) -> None:
         # Define debug_log method first
@@ -46,14 +47,9 @@ class NumpadMacros:
             'key_dot_alt', 'key_enter_alt'
         ]
 
-        # Register each key option with a default RESPOND message
+        # Register each key option with case-sensitive keys
         for key in key_options:
-            key_name = key.upper()  # Convert to uppercase for consistency
-            config.getchoice(
-                key,
-                {f"RESPOND MSG=\"{key_name} not assigned yet\"": None},
-                None
-            )
+            config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
 
         # Add pending key tracking
         self.pending_key: Optional[str] = None
