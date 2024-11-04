@@ -193,28 +193,6 @@ class NumpadMacros:
             self._debug_log(f"Initialized key mapping: {mapping}")
         return mapping
 
-    def _initialize_command_mapping(self) -> Dict[str, str]:
-        """Initialize the key to command mapping"""
-        mapping = {}
-
-        # Get all configured keys
-        for key in [
-            'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
-            'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
-            'key_dot', 'key_enter', 'key_grave',
-            'key_1_alt', 'key_2_alt', 'key_3_alt', 'key_4_alt', 'key_5_alt',
-            'key_6_alt', 'key_7_alt', 'key_8_alt', 'key_9_alt', 'key_0_alt',
-            'key_dot_alt', 'key_enter_alt'
-        ]:
-            # Get the command from config, with default "not assigned" message
-            command = self.printer.lookup_object('configfile').get('numpad_macros', key,
-                                                                   f"RESPOND MSG=\"{key} not assigned yet\"")
-            mapping[key] = command
-
-        if self.debug_log:
-            self._debug_log(f"Initialized command mapping: {mapping}")
-        return mapping
-
     def _handle_key_press(self, key: str, device_name: str) -> None:
         """Handle key press events with ENTER confirmation"""
         try:
