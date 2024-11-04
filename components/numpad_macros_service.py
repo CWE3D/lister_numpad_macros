@@ -86,7 +86,7 @@ class NumpadMacrosService:  # Changed from NumpadMacros
 
             # Load and validate configuration
             for key, default_cmd in default_keymap.items():
-                config_key = f"key_{key}"
+                config_key = key
                 cmd = config.get(config_key, default_cmd)
 
                 if self._validate_command(cmd):
