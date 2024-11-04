@@ -27,6 +27,9 @@ class NumpadMacros:
         # Add the method to the instance
         self._debug_log = _debug_log.__get__(self)
 
+        # Store config for later use
+        self.config = config
+
         # Initialize basic objects
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
@@ -38,7 +41,7 @@ class NumpadMacros:
         self.debug_log = config.getboolean('debug_log', False)
 
         # Register key configuration options
-        key_options = [
+        self.key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
             'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
             'key_dot', 'key_enter', 'key_grave',
@@ -47,8 +50,8 @@ class NumpadMacros:
             'key_dot_alt', 'key_enter_alt'
         ]
 
-        # Register each key option with case-sensitive keys
-        for key in key_options:
+        # Register each key option
+        for key in self.key_options:
             config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
 
         # Add pending key tracking
@@ -77,6 +80,19 @@ class NumpadMacros:
         )
 
         self._debug_log("NumpadMacrosClient initialized")
+
+    def _initialize_command_mapping(self) -> Dict[str, str]:
+        """Initialize the key to command mapping using stored config"""
+        mapping = {}
+
+        # Get commands from stored config object
+        for key in self.key_options:
+            command = self.config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
+            mapping[key] = command
+
+        if self.debug_log:
+            self._debug_log(f"Initialized command mapping: {mapping}")
+        return mapping
 
     def _monitor_input(self, device_path: str) -> None:
         """Monitor input device with error recovery"""
