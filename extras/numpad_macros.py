@@ -49,13 +49,6 @@ class NumpadMacros:
         self.key_mapping = self._initialize_key_mapping()
         self.command_mapping = self._initialize_command_mapping()
 
-        # Handle key_ prefix options
-        prefix_options = config.get_prefix_options('key_')
-        for key in self.command_mapping.keys():
-            config_key = f'key_{key}'
-            if config_key in prefix_options:
-                self.command_mapping[key] = config.get(config_key)
-
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.printer.register_event_handler("klippy:shutdown", self.handle_shutdown)
@@ -132,32 +125,35 @@ class NumpadMacros:
         """Initialize the key code to key name mapping"""
         mapping = {
             # Numpad specific keys
-            79: "1",  # KEY_KP1
-            80: "2",  # KEY_KP2
-            81: "3",  # KEY_KP3
-            75: "4",  # KEY_KP4
-            76: "5",  # KEY_KP5
-            77: "6",  # KEY_KP6
-            71: "7",  # KEY_KP7
-            72: "8",  # KEY_KP8
-            73: "9",  # KEY_KP9
-            82: "0",  # KEY_KP0
-            83: "DOT",  # KEY_KPDOT
-            96: "ENTER",  # KEY_KPENTER
+            79: "key_1",  # KEY_KP1
+            80: "key_2",  # KEY_KP2
+            81: "key_3",  # KEY_KP3
+            75: "key_4",  # KEY_KP4
+            76: "key_5",  # KEY_KP5
+            77: "key_6",  # KEY_KP6
+            71: "key_7",  # KEY_KP7
+            72: "key_8",  # KEY_KP8
+            73: "key_9",  # KEY_KP9
+            82: "key_0",  # KEY_KP0
+            83: "key_dot",  # KEY_KPDOT
+            96: "key_enter",  # KEY_KPENTER
+            114: "key_up",
+            115: "key_down",
 
             # Regular number keys
-            2: "1",  # KEY_1
-            3: "2",  # KEY_2
-            4: "3",  # KEY_3
-            5: "4",  # KEY_4
-            6: "5",  # KEY_5
-            7: "6",  # KEY_6
-            8: "7",  # KEY_7
-            9: "8",  # KEY_8
-            10: "9",  # KEY_9
-            11: "0",  # KEY_0
-            28: "ENTER",  # KEY_ENTER
-            41: "GRAVE"  # KEY_GRAVE
+            # This is for the alternative mode (volume button press)
+            2: "key_1_alt",  # KEY_1
+            3: "key_2_alt",  # KEY_2
+            4: "key_3_alt",  # KEY_3
+            5: "key_4_alt",  # KEY_4
+            6: "key_5_alt",  # KEY_5
+            7: "key_6_alt",  # KEY_6
+            8: "key_7_alt",  # KEY_7
+            9: "key_8_alt",  # KEY_8
+            10: "key_9_alt",  # KEY_9
+            11: "key_0_alt",  # KEY_0
+            28: "key_enter_alt",  # KEY_ENTER
+            41: "key_dot_alt",  # KEY_GRAVE
         }
 
         if self.debug_log:
@@ -165,31 +161,38 @@ class NumpadMacros:
         return mapping
 
     def _initialize_command_mapping(self) -> Dict[str, str]:
-        """Initialize the key to command mapping"""
+        """Initialize the key to command mapping with default RESPOND messages for unassigned keys"""
         mapping = {
-            # Number keys (both regular and numpad)
-            "1": "HOME",
-            "2": "PROBE_BED_MESH",
-            "3": "Z_TILT_ADJUST",
-            "4": "BED_PROBE_MANUAL_ADJUST",
-            "5": "TURN_ON_LIGHT",
-            "6": "TURN_OFF_LIGHT",
-            "7": "DISABLE_X_Y_STEPPERS",
-            "8": "DISABLE_EXTRUDER_STEPPER",
-            "9": "COLD_CHANGE_FILAMENT",
-            "0": "TOGGLE_FILAMENT_SENSOR",
+            # Set all keys to default "not assigned" messages first
+            "1": "RESPOND MSG=\"Key 1 not assigned yet\"",
+            "2": "RESPOND MSG=\"Key 2 not assigned yet\"",
+            "3": "RESPOND MSG=\"Key 3 not assigned yet\"",
+            "4": "RESPOND MSG=\"Key 4 not assigned yet\"",
+            "5": "RESPOND MSG=\"Key 5 not assigned yet\"",
+            "6": "RESPOND MSG=\"Key 6 not assigned yet\"",
+            "7": "RESPOND MSG=\"Key 7 not assigned yet\"",
+            "8": "RESPOND MSG=\"Key 8 not assigned yet\"",
+            "9": "RESPOND MSG=\"Key 9 not assigned yet\"",
+            "0": "RESPOND MSG=\"Key 0 not assigned yet\"",
+            "dot": "RESPOND MSG=\"Key dot not assigned yet\"",
+            "enter": "RESPOND MSG=\"Key enter not assigned yet\"",
+            "grave": "RESPOND MSG=\"Key grave not assigned yet\"",
+            "up": "RESPOND MSG=\"Key up not assigned yet\"",
+            "down": "RESPOND MSG=\"Key down not assigned yet\"",
 
-            # Special keys - add lowercase variants
-            "DOT": "PROBE_NOZZLE_DISTANCE",
-            "dot": "PROBE_NOZZLE_DISTANCE",  # Add lowercase variant
-            "ENTER": "RESUME",
-            "enter": "RESUME",  # Add lowercase variant
-            "GRAVE": "EMERGENCY_STOP",
-            "grave": "EMERGENCY_STOP",  # Add lowercase variant
-
-            # Volume knob controls
-            "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
-            "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
+            # Alternative mode keys (volume button press)
+            "1_alt": "RESPOND MSG=\"Key 1 (alt mode) not assigned yet\"",
+            "2_alt": "RESPOND MSG=\"Key 2 (alt mode) not assigned yet\"",
+            "3_alt": "RESPOND MSG=\"Key 3 (alt mode) not assigned yet\"",
+            "4_alt": "RESPOND MSG=\"Key 4 (alt mode) not assigned yet\"",
+            "5_alt": "RESPOND MSG=\"Key 5 (alt mode) not assigned yet\"",
+            "6_alt": "RESPOND MSG=\"Key 6 (alt mode) not assigned yet\"",
+            "7_alt": "RESPOND MSG=\"Key 7 (alt mode) not assigned yet\"",
+            "8_alt": "RESPOND MSG=\"Key 8 (alt mode) not assigned yet\"",
+            "9_alt": "RESPOND MSG=\"Key 9 (alt mode) not assigned yet\"",
+            "0_alt": "RESPOND MSG=\"Key 0 (alt mode) not assigned yet\"",
+            "dot_alt": "RESPOND MSG=\"Key dot (alt) not assigned yet\"",
+            "enter_alt": "RESPOND MSG=\"Key enter (alt) not assigned yet\"",
         }
 
         if self.debug_log:
