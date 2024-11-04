@@ -27,6 +27,11 @@ class NumpadMacros:
         self.device_paths = [path.strip() for path in device_paths]
         self.debug_log = config.getboolean('debug_log', False)
 
+        # Add configuration for keys that don't require confirmation
+        default_no_confirm = "key_up,key_down"  # Default keys that don't need confirmation
+        no_confirm_str = config.get('no_confirm_keys', default_no_confirm)
+        self.no_confirm_keys = [key.strip() for key in no_confirm_str.split(',') if key.strip()]
+
         # Define key options
         self.key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
@@ -172,7 +177,21 @@ class NumpadMacros:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-            # Check if this is an ENTER key press
+            # Check if this key needs confirmation
+            if key in self.no_confirm_keys:
+                # Execute immediately without waiting for ENTER
+                command = self.command_mapping.get(key)
+                if command:
+                    self._debug_log(f"Executing command without confirmation: {command}")
+                    try:
+                        self.gcode.run_script_from_command(command)
+                    except Exception as cmd_error:
+                        error_msg = f"Error executing command '{command}': {str(cmd_error)}"
+                        self._debug_log(error_msg)
+                        self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                return
+
+            # Rest of the method remains exactly the same...
             if key in ["key_enter", "key_enter_alt"]:
                 # Execute pending command if there is one
                 if self.pending_key:
