@@ -63,6 +63,13 @@ class NumpadMacros:
             'key_down',
         ]
 
+        # Add debounce tracking
+        self.last_knob_event_time: Dict[str, float] = {
+            'key_up': 0.0,
+            'key_down': 0.0
+        }
+        self.knob_debounce_delay = config.getfloat('knob_debounce_delay', 0.1)  # 100ms default
+
         # Initialize command mapping
         self.command_mapping = {}
         for key in self.key_options:
@@ -193,10 +200,23 @@ class NumpadMacros:
                     time.sleep(DEFAULT_RETRY_DELAY)
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events with ENTER confirmation"""
+        """Handle key press events with ENTER confirmation and knob debouncing"""
         try:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
+
+            # Special handling for knob inputs
+            if key in ['key_up', 'key_down']:
+                current_time = time.time()
+                last_event_time = self.last_knob_event_time[key]
+
+                # Check if enough time has passed since last event
+                if (current_time - last_event_time) < self.knob_debounce_delay:
+                    self._debug_log(f"Debouncing {key} event, skipping")
+                    return
+
+                # Update last event time
+                self.last_knob_event_time[key] = current_time
 
             # Check if this key needs confirmation
             if key in self.no_confirm_keys:
