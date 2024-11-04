@@ -201,7 +201,6 @@ class NumpadMacros:
             # Special handling for ENTER key
             if key in ["key_enter", "key_enter_alt"]:
                 self.gcode.run_script_from_command("_HANDLE_KNOB_INPUT DIRECTION=enter")
-                return
 
             # Check if this key needs confirmation
             if key in self.no_confirm_keys:
