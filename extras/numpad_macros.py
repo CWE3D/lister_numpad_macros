@@ -220,7 +220,6 @@ class NumpadMacros:
                     if command:
                         self._debug_log(f"Executing command: {command}")
                         try:
-                            self.gcode.run_script_from_command("_HANDLE_KNOB_INPUT DIRECTION=enter")
                             self.gcode.run_script_from_command(command)
                         except Exception as cmd_error:
                             error_msg = f"Error executing command '{command}': {str(cmd_error)}"
