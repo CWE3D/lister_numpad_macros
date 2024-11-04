@@ -58,7 +58,8 @@ class NumpadMacrosService:  # Changed from NumpadMacros
 
         logging.info("Numpad Macros Service Component Initialized")
 
-    def _get_default_keymap(self) -> Dict[str, str]:
+    @staticmethod
+    def _get_default_keymap() -> Dict[str, str]:
         """Return default key mapping configuration"""
         return {
             # Standard numpad keys
@@ -72,11 +73,11 @@ class NumpadMacrosService:  # Changed from NumpadMacros
             "8": "DISABLE_EXTRUDER_STEPPER",
             "9": "COLD_CHANGE_FILAMENT",
             "0": "TOGGLE_FILAMENT_SENSOR",
-            "DOT": "PROBE_NOZZLE_DISTANCE",
-            "ENTER": "RESUME",
+            "dot": "PROBE_NOZZLE_DISTANCE",
+            "enter": "RESUME",
             # Volume knob controls
-            "UP": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
-            "DOWN": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
+            "up": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
+            "down": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
         }
 
     def _init_keymap_config(self, config) -> None:
@@ -106,7 +107,8 @@ class NumpadMacrosService:  # Changed from NumpadMacros
             self.keymap_config = self._get_default_keymap()
             self._status['last_error'] = str(e)
 
-    def _validate_command(self, cmd: str) -> bool:
+    @staticmethod
+    def _validate_command(cmd: str) -> bool:
         """Validate command format"""
         if not isinstance(cmd, str) or not cmd.strip():
             return False

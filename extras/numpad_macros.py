@@ -34,7 +34,7 @@ class NumpadMacros:
             'key_dot', 'key_enter', 'key_grave',
             'key_1_alt', 'key_2_alt', 'key_3_alt', 'key_4_alt', 'key_5_alt',
             'key_6_alt', 'key_7_alt', 'key_8_alt', 'key_9_alt', 'key_0_alt',
-            'key_dot_alt', 'key_enter_alt'
+            'key_dot_alt', 'key_enter_alt', 'key_up', 'key_down'
         ]
 
         # Initialize command mapping
@@ -72,7 +72,8 @@ class NumpadMacros:
             logging.info(f"NumpadMacrosClient Debug: {message}")
             self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
 
-    def _initialize_key_mapping(self) -> Dict[int, str]:
+    @staticmethod
+    def _initialize_key_mapping() -> Dict[int, str]:
         """Initialize the key code to key name mapping"""
         mapping = {
             # Numpad specific keys
@@ -88,6 +89,8 @@ class NumpadMacros:
             82: "key_0",  # KEY_KP0
             83: "key_dot",  # KEY_KPDOT
             96: "key_enter",  # KEY_KPENTER
+            114: "key_down",
+            115: "key_up",
 
             # Regular number keys (for alt mode)
             2: "key_1_alt",  # KEY_1
