@@ -34,7 +34,7 @@ class NumpadMacros:
             'key_dot', 'key_enter', 'key_grave',
             'key_1_alt', 'key_2_alt', 'key_3_alt', 'key_4_alt', 'key_5_alt',
             'key_6_alt', 'key_7_alt', 'key_8_alt', 'key_9_alt', 'key_0_alt',
-            'key_dot_alt', 'key_enter_alt', 'key_up', 'key_down'
+            'key_dot_alt', 'key_enter_alt', 'key_up', 'key_down',
         ]
 
         # Initialize command mapping
