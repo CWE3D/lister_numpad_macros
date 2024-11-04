@@ -36,6 +36,25 @@ class NumpadMacros:
         self.device_paths = [path.strip() for path in device_paths]
         self.debug_log = config.getboolean('debug_log', False)
 
+        # Register key configuration options
+        key_options = [
+            'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
+            'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
+            'key_dot', 'key_enter', 'key_grave',
+            'key_1_alt', 'key_2_alt', 'key_3_alt', 'key_4_alt', 'key_5_alt',
+            'key_6_alt', 'key_7_alt', 'key_8_alt', 'key_9_alt', 'key_0_alt',
+            'key_dot_alt', 'key_enter_alt'
+        ]
+
+        # Register each key option with a default RESPOND message
+        for key in key_options:
+            key_name = key.upper()  # Convert to uppercase for consistency
+            config.getchoice(
+                key,
+                {f"RESPOND MSG=\"{key_name} not assigned yet\"": None},
+                None
+            )
+
         # Add pending key tracking
         self.pending_key: Optional[str] = None
 
