@@ -201,46 +201,44 @@ class NumpadMacros:
                     time.sleep(DEFAULT_RETRY_DELAY)
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events with improved knob handling"""
+        """Handle key press events with enhanced debugging"""
         try:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-            # Special handling for knob inputs with strict debouncing
+            # Special handling for knob inputs
             if key in ['key_up', 'key_down']:
                 current_time = time.time()
                 last_event_time = self.last_knob_event_time[key]
 
+                # Debug command mapping state
+                self.gcode.respond_info(f"DEBUG: Processing {key}")
+                command = self.command_mapping.get(key)
+                self.gcode.respond_info(f"DEBUG: Mapped command is: {command}")
+
+                # Get current mapping
+                for k, v in self.command_mapping.items():
+                    self.gcode.respond_info(f"DEBUG: Mapping {k}: {v}")
+
                 # Extended debounce check - 200ms minimum between events
-                if (current_time - last_event_time) < 0.2:  # 200ms debounce
-                    self._debug_log(f"Strict debouncing {key} event, skipping")
+                if (current_time - last_event_time) < 0.2:
+                    self.gcode.respond_info(f"DEBUG: Debouncing {key} event, skipping")
                     return
 
-                # Update last event time before scheduling
+                # Update last event time
                 self.last_knob_event_time[key] = current_time
 
-                # Get the command
-                command = self.command_mapping.get(key)
                 if command:
                     try:
-                        # Schedule command execution with a slight delay to ensure
-                        # current command processing is complete
-                        def delayed_execute(eventtime):
-                            try:
-                                self.gcode.run_script_from_command(command)
-                            except Exception as cmd_error:
-                                self.gcode.respond_info(
-                                    f"NumpadMacros Error: Error executing delayed command: {str(cmd_error)}"
-                                )
-
-                        # Schedule with 50ms delay
-                        self.reactor.register_callback(delayed_execute, waketime=current_time + 0.05)
-                        self._debug_log(f"Scheduled delayed execution of knob command: {command}")
-
+                        # Execute command
+                        self.gcode.respond_info(f"DEBUG: About to execute command: {command}")
+                        self.gcode.run_script_from_command(command)
+                        self.gcode.respond_info(f"DEBUG: Command execution completed")
                     except Exception as cmd_error:
-                        error_msg = f"Error scheduling knob command '{command}': {str(cmd_error)}"
-                        self._debug_log(error_msg)
+                        error_msg = f"Error executing command '{command}': {str(cmd_error)}"
                         self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
+                else:
+                    self.gcode.respond_info(f"DEBUG: No command mapping found for {key}")
                 return
 
             # Check if this key needs confirmation
