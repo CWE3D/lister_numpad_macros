@@ -23,6 +23,10 @@ class NumpadMacros:
         self.gcode = self.printer.lookup_object('gcode')
         self.query_prefix = config.get('query_prefix', '_QUERY')
 
+        self.last_global_event_time = 0
+        self.last_global_event_code = None
+        self.global_debounce_time = 0.3  # 300ms global debounce
+
         # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
         self.device_paths = [path.strip() for path in device_paths]
@@ -142,6 +146,25 @@ class NumpadMacros:
         }
         return mapping
 
+    def _should_process_event(self, event_code: int, device_name: str) -> bool:
+        """
+        Determine if an event should be processed based on global event history
+        """
+        current_time = time.time()
+        time_since_last = current_time - self.last_global_event_time
+
+        # If this is the same event code within debounce period, skip it
+        if (time_since_last < self.global_debounce_time and
+                event_code == self.last_global_event_code):
+            self._debug_log(f"Debouncing duplicate event from {device_name} "
+                            f"(code: {event_code}, time since last: {time_since_last:.3f}s)")
+            return False
+
+        # Update global tracking
+        self.last_global_event_time = current_time
+        self.last_global_event_code = event_code
+        return True
+
     def _monitor_input(self, device_path: str) -> None:
         """Monitor input device with error recovery"""
         device = self.devices.get(device_path)
@@ -158,42 +181,36 @@ class NumpadMacros:
                     if event.type == evdev.ecodes.EV_KEY:
                         key_event = categorize(event)
 
-                        # Enhanced debug logging for all key events
+                        # Debug logging for all events if enabled
                         if self.debug_log:
                             self._debug_log(
-                                f"Key event from {device.name} - "
+                                f"Raw key event from {device.name} - "
                                 f"code: {key_event.scancode}, "
                                 f"name: {key_event.keycode}, "
                                 f"type: {event.type}, "
-                                f"value: {event.value}"
+                                f"value: {event.value}, "
+                                f"device: {device_path}"
                             )
 
-                        # Only process key down events (value == 1)
-                        # Ignore key up (value == 0) and key hold (value == 2) events
-                        if key_event.keystate == key_event.key_down:
-                            # Try both the scancode and the raw code
+                        # Only process press events (value == 1) for ALL keys
+                        if event.value == 1:
+                            # Check global event history before processing
+                            if not self._should_process_event(key_event.scancode, device.name):
+                                continue
+
                             key_value = self.key_mapping.get(key_event.scancode)
                             if key_value is None:
                                 key_value = self.key_mapping.get(event.code)
 
                             if key_value is not None:
-                                if key_value in ['key_up', 'key_down']:
-                                    # For volume knob events, only process if it's a key press (value == 1)
-                                    if event.value == 1:
-                                        self.reactor.register_callback(
-                                            lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                        self._debug_log(f"Volume knob event processed: {key_value}")
-                                else:
-                                    # For regular keys, process as normal
-                                    self.reactor.register_callback(
-                                        lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                    self._debug_log(f"Key mapped and processed: {key_value}")
-                            else:
-                                self._debug_log(
-                                    f"Unhandled key from {device.name}: {key_event.keycode} "
-                                    f"(scancode: {key_event.scancode}, "
-                                    f"code: {event.code})"
-                                )
+                                self.reactor.register_callback(
+                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                self._debug_log(f"Processing key press for: {key_value} from {device_path}")
+                        else:
+                            # Debug log for ignored events
+                            event_type = "release" if event.value == 0 else "hold"
+                            self._debug_log(f"Ignoring key {event_type} event for {key_event.keycode} "
+                                          f"from {device_path}")
 
             except (OSError, IOError) as e:
                 if not self._thread_exit.is_set():
