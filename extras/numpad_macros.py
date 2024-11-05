@@ -259,10 +259,8 @@ class NumpadMacros:
                 # Execute query version of the command if it exists
                 command = self.command_mapping.get(key)
                 if command and command.startswith('_'):
-                    # Extract the command name without the leading underscore
-                    command_name = command[1:]  # Remove leading underscore
-                    # Construct query command name
-                    query_command = f"{self.query_prefix}{command_name}"
+                    # Construct query command name - keep the original underscore
+                    query_command = f"{self.query_prefix}{command}"
                     self._debug_log(f"Executing query command: {query_command}")
                     try:
                         self.gcode.run_script_from_command(query_command)
