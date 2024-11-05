@@ -67,12 +67,12 @@ sequenceDiagram
 1. Clone the repository:
 ```bash
 cd ~
-git clone https://github.com/your-username/numpad_macros.git
+git clone https://github.com/CWE3D/lister_numpad_macros.git
 ```
 
 2. Run the installation script:
 ```bash
-cd ~/numpad_macros
+cd ~/lister_numpad_macros
 chmod +x install.sh
 ./install.sh
 ```
