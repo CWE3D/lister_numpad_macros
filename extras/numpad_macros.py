@@ -212,43 +212,33 @@ class NumpadMacros:
     def _handle_key_press(self, key: str, device_name: str) -> None:
         """Handle key press events with enhanced debugging"""
         try:
-            # Show key press in console
-            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
-
             # Special handling for knob inputs
             if key in ['key_up', 'key_down']:
                 current_time = time.time()
                 last_event_time = self.last_knob_event_time[key]
 
-                # Debug command mapping state
-                self.gcode.respond_info(f"DEBUG: Processing {key}")
-                command = self.command_mapping.get(key)
-                self.gcode.respond_info(f"DEBUG: Mapped command is: {command}")
-
-                # Get current mapping
-                for k, v in self.command_mapping.items():
-                    self.gcode.respond_info(f"DEBUG: Mapping {k}: {v}")
-
-                # Extended debounce check - 200ms minimum between events
-                if (current_time - last_event_time) < 0.2:
-                    self.gcode.respond_info(f"DEBUG: Debouncing {key} event, skipping")
+                # Strict 300ms debounce for knob events
+                if (current_time - last_event_time) < 0.3:
+                    self._debug_log(f"Strict debouncing {key} event, skipping")
                     return
 
-                # Update last event time
+                # Update last event time before processing
                 self.last_knob_event_time[key] = current_time
 
+                # Get command mapping once
+                command = self.command_mapping.get(key)
                 if command:
                     try:
-                        # Execute command
-                        self.gcode.respond_info(f"DEBUG: About to execute command: {command}")
+                        self._debug_log(f"Executing knob command: {command}")
                         self.gcode.run_script_from_command(command)
-                        self.gcode.respond_info(f"DEBUG: Command execution completed")
                     except Exception as cmd_error:
                         error_msg = f"Error executing command '{command}': {str(cmd_error)}"
+                        self._debug_log(error_msg)
                         self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
-                else:
-                    self.gcode.respond_info(f"DEBUG: No command mapping found for {key}")
                 return
+
+            # Show key press in console
+            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
             # Check if this key needs confirmation
             if key in self.no_confirm_keys:
@@ -290,22 +280,15 @@ class NumpadMacros:
 
                 # Execute query version of the command if it exists
                 command = self.command_mapping.get(key)
-                self._debug_log(f"Got command from mapping: {command}")
-
-                if command:
-                    if command.startswith('_'):
-                        # Simply prepend _QUERY to the actual command name
-                        query_command = f"_QUERY{command}"
-                        self._debug_log(f"Attempting to execute query command: {query_command}")
-                        try:
-                            self.gcode.run_script_from_command(query_command)
-                        except Exception as query_error:
-                            # Only log debug message if query fails - don't interrupt normal flow
-                            self._debug_log(f"Query command failed with error: {str(query_error)}")
-                    else:
-                        self._debug_log(f"Command does not start with underscore: {command}")
-                else:
-                    self._debug_log(f"No command found for key: {key}")
+                if command and command.startswith('_'):
+                    # Simply prepend _QUERY to the actual command name
+                    query_command = f"_QUERY{command}"
+                    self._debug_log(f"Attempting to execute query command: {query_command}")
+                    try:
+                        self.gcode.run_script_from_command(query_command)
+                    except Exception as query_error:
+                        # Only log debug message if query fails - don't interrupt normal flow
+                        self._debug_log(f"Query command failed with error: {str(query_error)}")
 
                 self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
 
