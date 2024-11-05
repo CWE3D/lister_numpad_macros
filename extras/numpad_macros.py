@@ -168,7 +168,8 @@ class NumpadMacros:
                                 f"value: {event.value}"
                             )
 
-                        # Only process key press events
+                        # Only process key down events (value == 1)
+                        # Ignore key up (value == 0) and key hold (value == 2) events
                         if key_event.keystate == key_event.key_down:
                             # Try both the scancode and the raw code
                             key_value = self.key_mapping.get(key_event.scancode)
@@ -176,9 +177,17 @@ class NumpadMacros:
                                 key_value = self.key_mapping.get(event.code)
 
                             if key_value is not None:
-                                self.reactor.register_callback(
-                                    lambda e, k=key_value: self._handle_key_press(k, device.name))
-                                self._debug_log(f"Key mapped and processed: {key_value}")
+                                if key_value in ['key_up', 'key_down']:
+                                    # For volume knob events, only process if it's a key press (value == 1)
+                                    if event.value == 1:
+                                        self.reactor.register_callback(
+                                            lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                        self._debug_log(f"Volume knob event processed: {key_value}")
+                                else:
+                                    # For regular keys, process as normal
+                                    self.reactor.register_callback(
+                                        lambda e, k=key_value: self._handle_key_press(k, device.name))
+                                    self._debug_log(f"Key mapped and processed: {key_value}")
                             else:
                                 self._debug_log(
                                     f"Unhandled key from {device.name}: {key_event.keycode} "
