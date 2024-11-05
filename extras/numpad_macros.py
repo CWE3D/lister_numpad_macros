@@ -335,13 +335,13 @@ class NumpadMacros:
                     self.input_threads[device_path] = thread
                     break
                 except Exception as e:
-                retry_count += 1
-                if retry_count == DEFAULT_RETRY_COUNT:
-                    error_msg = f"Failed to initialize device {device_path} after {DEFAULT_RETRY_COUNT} attempts: {str(e)}"
-                    self._debug_log(error_msg)
-                else:
-                    self._debug_log(f"Connection attempt {retry_count} failed for {device_path}, retrying...")
-                    time.sleep(DEFAULT_RETRY_DELAY)
+                    retry_count += 1
+                    if retry_count == DEFAULT_RETRY_COUNT:
+                        error_msg = f"Failed to initialize device {device_path} after {DEFAULT_RETRY_COUNT} attempts: {str(e)}"
+                        self._debug_log(error_msg)
+                    else:
+                        self._debug_log(f"Connection attempt {retry_count} failed for {device_path}, retrying...")
+                        time.sleep(DEFAULT_RETRY_DELAY)
 
 
 def handle_shutdown(self) -> None:
