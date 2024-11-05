@@ -260,7 +260,7 @@ class NumpadMacros:
                 command = self.command_mapping.get(key)
                 if command and command.startswith('_'):
                     # Construct query command name - keep the original underscore
-                    query_command = f"{self.query_prefix}{command}"
+                    query_command = f"_QUERY{command}"
                     self._debug_log(f"Executing query command: {query_command}")
                     try:
                         self.gcode.run_script_from_command(query_command)
