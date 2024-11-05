@@ -23,6 +23,11 @@ class NumpadMacros:
         self.gcode = self.printer.lookup_object('gcode')
         self.query_prefix = config.get('query_prefix', '_QUERY')
 
+        # Register event handlers
+        self.printer.register_event_handler("klippy:connect", self.handle_connect)
+        self.printer.register_event_handler("klippy:disconnect", self.handle_disconnect)  # Changed from shutdown
+        self.printer.register_event_handler('moonraker:connected', self.handle_moonraker_connected)
+
         # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
         self.device_paths = [path.strip() for path in device_paths]
@@ -91,6 +96,21 @@ class NumpadMacros:
             self.cmd_NUMPAD_TEST,
             desc="Test numpad functionality and display current configuration"
         )
+
+    def handle_disconnect(self) -> None:  # Changed from handle_shutdown
+        """Clean up resources during disconnect"""
+        self._is_shutdown = True
+        self._thread_exit.set()
+
+        for device_path, device in self.devices.items():
+            try:
+                device.close()
+            except Exception as e:
+                self._debug_log(f"Error closing device {device_path}: {str(e)}")
+
+        for thread in self.input_threads.values():
+            if thread.is_alive():
+                thread.join(timeout=1.0)
 
     def _check_and_apply_z_adjustment(self) -> None:
         """Apply accumulated Z adjustment after timeout"""
