@@ -21,6 +21,7 @@ class NumpadMacros:
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
+        self.query_prefix = config.get('query_prefix', '_QUERY')
 
         # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
@@ -200,7 +201,7 @@ class NumpadMacros:
                     time.sleep(DEFAULT_RETRY_DELAY)
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events with ENTER confirmation and knob debouncing"""
+        """Handle key press events with ENTER confirmation and query execution"""
         try:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
@@ -232,7 +233,6 @@ class NumpadMacros:
                         self.gcode.respond_info(f"NumpadMacros Error: {error_msg}")
                 return
 
-            # Rest of the method remains exactly the same...
             if key in ["key_enter", "key_enter_alt"]:
                 # Execute pending command if there is one
                 if self.pending_key:
@@ -255,6 +255,21 @@ class NumpadMacros:
             else:
                 # Store new pending key, overwriting any existing one
                 self.pending_key = key
+
+                # Execute query version of the command if it exists
+                command = self.command_mapping.get(key)
+                if command and command.startswith('_'):
+                    # Extract the command name without the leading underscore
+                    command_name = command[1:]  # Remove leading underscore
+                    # Construct query command name
+                    query_command = f"{self.query_prefix}{command_name}"
+                    self._debug_log(f"Executing query command: {query_command}")
+                    try:
+                        self.gcode.run_script_from_command(query_command)
+                    except Exception as query_error:
+                        # Only log debug message if query fails - don't interrupt normal flow
+                        self._debug_log(f"Query command not found or failed: {str(query_error)}")
+
                 self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
 
             # Notify Moonraker of the keypress
