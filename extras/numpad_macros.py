@@ -223,6 +223,7 @@ class NumpadMacros:
             if key in self.no_confirm_keys:
                 # Execute immediately without waiting for ENTER
                 command = self.command_mapping.get(key)
+                self._debug_log(f"No confirm key detected, command: {command}")
                 if command:
                     self._debug_log(f"Executing command without confirmation: {command}")
                     try:
@@ -258,15 +259,22 @@ class NumpadMacros:
 
                 # Execute query version of the command if it exists
                 command = self.command_mapping.get(key)
-                if command and command.startswith('_'):
-                    # Construct query command name - keep the original underscore
-                    query_command = f"_QUERY{command}"
-                    self._debug_log(f"Executing query command: {query_command}")
-                    try:
-                        self.gcode.run_script_from_command(query_command)
-                    except Exception as query_error:
-                        # Only log debug message if query fails - don't interrupt normal flow
-                        self._debug_log(f"Query command not found or failed: {str(query_error)}")
+                self._debug_log(f"Got command from mapping: {command}")
+
+                if command:
+                    if command.startswith('_'):
+                        # Simply prepend _QUERY to the actual command name
+                        query_command = f"_QUERY{command}"
+                        self._debug_log(f"Attempting to execute query command: {query_command}")
+                        try:
+                            self.gcode.run_script_from_command(query_command)
+                        except Exception as query_error:
+                            # Only log debug message if query fails - don't interrupt normal flow
+                            self._debug_log(f"Query command failed with error: {str(query_error)}")
+                    else:
+                        self._debug_log(f"Command does not start with underscore: {command}")
+                else:
+                    self._debug_log(f"No command found for key: {key}")
 
                 self._debug_log(f"Stored pending key: {key} (press ENTER to execute)")
 
