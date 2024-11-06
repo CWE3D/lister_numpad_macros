@@ -1,11 +1,12 @@
-from logging import getLogger
-
 class NumpadMacros:
     def __init__(self, config):
         self.server = config.get_server()
         self.config = config
-        self.logger = getLogger(self.config.get_name())
         self.name = config.get_name()
+
+        # Get the server's event loop and logger
+        self.eventloop = self.server.get_event_loop()
+        self.logger = config.get_component('logging').get_logger()
 
         # Configuration
         self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)
@@ -46,19 +47,21 @@ class NumpadMacros:
             self._handle_numpad_event
         )
 
-        self.logger.info("NumpadMacros initialized")
+        if self.debug_log:
+            self.logger.debug("NumpadMacros initialized")
 
     async def component_init(self):
         # Get printer component after server is fully initialized
         self.printer = self.server.lookup_component('printer')
-        self.logger.info("NumpadMacros component initialization complete")
+        await self.printer.wait_started()
+        if self.debug_log:
+            self.logger.debug("NumpadMacros component initialization complete")
 
     def _log_debug(self, message):
         if self.debug_log:
             self.logger.debug(f"NumpadMacros: {message}")
 
     async def _handle_numpad_event(self, web_request):
-        # Check if printer component is available
         if self.printer is None:
             self.logger.error("Printer component not available")
             return {'status': "error", 'message': "Printer not initialized"}
@@ -67,12 +70,16 @@ class NumpadMacros:
         key = f"key_{event.get('key')}"
         self._log_debug(f"Received key event: {key}")
 
-        if key in self.key_mapping:
-            if key in self.special_keys:
-                await self._handle_special_key(key)
-            else:
-                await self._execute_macro(self.key_mapping[key])
-        return {'status': "ok"}
+        try:
+            if key in self.key_mapping:
+                if key in self.special_keys:
+                    await self._handle_special_key(key)
+                else:
+                    await self._execute_macro(self.key_mapping[key])
+            return {'status': "ok"}
+        except Exception as e:
+            self.logger.exception(f"Error handling numpad event: {str(e)}")
+            return {'status': "error", 'message': str(e)}
 
     async def _handle_special_key(self, key):
         await self._update_printer_state()
@@ -85,9 +92,8 @@ class NumpadMacros:
         try:
             result = await self.printer.run_method("info")
             self.is_printing = result.get('state') == 'printing'
-            toolhead = self.printer.lookup_component('toolhead')
-            if toolhead:
-                self.current_z = toolhead.get_position()[2]
+            if "toolhead" in result:
+                self.current_z = result["toolhead"]["position"][2]
             self.is_probing = await self.printer.run_method("gcode.check_probe_status")
         except Exception as e:
             self.logger.error(f"Error updating printer state: {str(e)}")
@@ -145,7 +151,8 @@ class NumpadMacros:
 
     async def _speed_adjust_up(self):
         try:
-            current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            current_status = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            current_factor = current_status["speed_factor"]
             new_factor = min(current_factor + self.speed_adjust_increment, self.max_speed_factor)
             await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
         except Exception as e:
@@ -153,11 +160,13 @@ class NumpadMacros:
 
     async def _speed_adjust_down(self):
         try:
-            current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            current_status = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            current_factor = current_status["speed_factor"]
             new_factor = max(current_factor - self.speed_adjust_increment, self.min_speed_factor)
             await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
         except Exception as e:
             self.logger.error(f"Error adjusting speed down: {str(e)}")
+
 
 def load_component(config):
     return NumpadMacros(config)
