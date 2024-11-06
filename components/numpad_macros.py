@@ -2,8 +2,8 @@ class NumpadMacros:
     def __init__(self, config):
         self.server = config.get_server()
         self.config = config
-        self.printer = self.server.lookup_component('printer')
         self.logger = config.get_logger()
+        self.name = config.get_name()
 
         # Configuration
         self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)
@@ -16,6 +16,7 @@ class NumpadMacros:
         self.is_printing = False
         self.is_probing = False
         self.current_z = 0
+        self.printer = None
 
         # User-configurable key mapping
         self.key_mapping = {
@@ -46,7 +47,8 @@ class NumpadMacros:
         self.logger.info("NumpadMacros initialized")
 
     async def component_init(self):
-        # Perform any asynchronous initialization here
+        # Get printer component after server is fully initialized
+        self.printer = self.server.lookup_component('printer')
         self.logger.info("NumpadMacros component initialization complete")
 
     def _log_debug(self, message):
@@ -54,6 +56,11 @@ class NumpadMacros:
             self.logger.debug(f"NumpadMacros: {message}")
 
     async def _handle_numpad_event(self, web_request):
+        # Check if printer component is available
+        if self.printer is None:
+            self.logger.error("Printer component not available")
+            return {'status': "error", 'message': "Printer not initialized"}
+
         event = web_request.get_json_body()
         key = f"key_{event.get('key')}"
         self._log_debug(f"Received key event: {key}")
@@ -73,11 +80,17 @@ class NumpadMacros:
             await self._handle_down()
 
     async def _update_printer_state(self):
-        result = await self.printer.run_method("info")
-        self.is_printing = result['state'] == 'printing'
-        toolhead = self.printer.lookup_component('toolhead')
-        self.current_z = toolhead.get_position()[2]
-        self.is_probing = await self.printer.run_method("gcode.check_probe_status")
+        try:
+            result = await self.printer.run_method("info")
+            self.is_printing = result.get('state') == 'printing'
+            toolhead = self.printer.lookup_component('toolhead')
+            if toolhead:
+                self.current_z = toolhead.get_position()[2]
+            self.is_probing = await self.printer.run_method("gcode.check_probe_status")
+        except Exception as e:
+            self.logger.error(f"Error updating printer state: {str(e)}")
+            self.is_printing = False
+            self.is_probing = False
 
     async def _handle_up(self):
         if self.is_probing:
@@ -102,8 +115,11 @@ class NumpadMacros:
             await self._execute_macro(self.key_mapping['key_down'])
 
     async def _execute_macro(self, macro_name):
-        self._log_debug(f"Executing macro: {macro_name}")
-        await self.printer.run_method("gcode.script", script=macro_name)
+        try:
+            self._log_debug(f"Executing macro: {macro_name}")
+            await self.printer.run_method("gcode.script", script=macro_name)
+        except Exception as e:
+            self.logger.error(f"Error executing macro {macro_name}: {str(e)}")
 
     async def _probe_up(self):
         if self.current_z < 0.1:
@@ -126,14 +142,20 @@ class NumpadMacros:
         await self._execute_macro(f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1")
 
     async def _speed_adjust_up(self):
-        current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
-        new_factor = min(current_factor + self.speed_adjust_increment, self.max_speed_factor)
-        await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
+        try:
+            current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            new_factor = min(current_factor + self.speed_adjust_increment, self.max_speed_factor)
+            await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
+        except Exception as e:
+            self.logger.error(f"Error adjusting speed up: {str(e)}")
 
     async def _speed_adjust_down(self):
-        current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
-        new_factor = max(current_factor - self.speed_adjust_increment, self.min_speed_factor)
-        await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
+        try:
+            current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+            new_factor = max(current_factor - self.speed_adjust_increment, self.min_speed_factor)
+            await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
+        except Exception as e:
+            self.logger.error(f"Error adjusting speed down: {str(e)}")
 
 def load_component(config):
     return NumpadMacros(config)
