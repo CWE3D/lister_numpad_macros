@@ -1,172 +1,127 @@
+# Numpad Macros Component for Moonraker
+#
+# Copyright (C) 2024
+from __future__ import annotations
+import logging
+
 class NumpadMacros:
     def __init__(self, config):
+        # Core initialization
         self.server = config.get_server()
-        self.config = config
         self.name = config.get_name()
+        # Get root logger
+        self.logger = logging.getLogger(self.name)
 
-        # Get the server's event loop and logger
-        self.eventloop = self.server.get_event_loop()
-        self.logger = config.get_component('logging').get_logger()
-
-        # Configuration
+        # Get configuration options
+        self.debug_log = config.getboolean('debug_log', False)
         self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)
         self.speed_adjust_increment = config.getfloat('speed_adjust_increment', 0.05)
         self.min_speed_factor = config.getfloat('min_speed_factor', 0.2)
         self.max_speed_factor = config.getfloat('max_speed_factor', 2.0)
-        self.debug_log = config.getboolean('debug_log', False)
 
         # State tracking
+        self.printer = None
+        self.klippy_apis = None
         self.is_printing = False
         self.is_probing = False
-        self.current_z = 0
-        self.printer = None
+        self.current_z = 0.0
 
-        # User-configurable key mapping
-        self.key_mapping = {
-            'key_1': config.get('key_1', '_HOME_ALL'),
-            'key_2': config.get('key_2', '_SAFE_PARK_OFF'),
-            'key_3': config.get('key_3', '_CANCEL_PRINT'),
-            'key_4': config.get('key_4', '_PRE_HEAT_BED'),
-            'key_5': config.get('key_5', '_PRE_HEAT_NOZZLE'),
-            'key_6': config.get('key_6', '_BED_PROBE_MANUAL_ADJUST'),
-            'key_7': config.get('key_7', '_DISABLE_X_Y_STEPPERS'),
-            'key_8': config.get('key_8', '_CALIBRATE_NOZZLE_OFFSET_PROBE'),
-            'key_9': config.get('key_9', '_REPEAT_LAST_PRINT'),
-            'key_0': config.get('key_0', '_TOGGLE_PAUSE_RESUME'),
-            'key_dot': config.get('key_dot', '_EMERGENCY_STOP'),
-            'key_up': config.get('key_up', '_KNOB_UP'),
-            'key_down': config.get('key_down', '_KNOB_DOWN'),
-        }
-
-        # Special handling for up/down keys
-        self.special_keys = {'key_up', 'key_down'}
-
-        # Register endpoint
+        # Register endpoint for numpad events
         self.server.register_endpoint(
-            "/server/numpad_event", ['POST'],
+            "/server/numpad_event",
+            ['POST'],
             self._handle_numpad_event
         )
 
+        # Register notification for status updates
+        self.server.register_notification('numpad_macros:status_update')
+
         if self.debug_log:
-            self.logger.debug("NumpadMacros initialized")
+            self.logger.debug("NumpadMacros component initialized")
 
     async def component_init(self):
-        # Get printer component after server is fully initialized
+        # Get printer APIs - these are only available after initialization
         self.printer = self.server.lookup_component('printer')
-        await self.printer.wait_started()
-        if self.debug_log:
-            self.logger.debug("NumpadMacros component initialization complete")
-
-    def _log_debug(self, message):
-        if self.debug_log:
-            self.logger.debug(f"NumpadMacros: {message}")
+        self.klippy_apis = self.server.lookup_component('klippy_apis')
+        self.logger.info("NumpadMacros component initialization complete")
 
     async def _handle_numpad_event(self, web_request):
-        if self.printer is None:
-            self.logger.error("Printer component not available")
-            return {'status': "error", 'message': "Printer not initialized"}
-
         event = web_request.get_json_body()
-        key = f"key_{event.get('key')}"
-        self._log_debug(f"Received key event: {key}")
+        if self.debug_log:
+            self.logger.debug(f"Received numpad event: {event}")
 
         try:
-            if key in self.key_mapping:
-                if key in self.special_keys:
-                    await self._handle_special_key(key)
+            key = event.get('key', '')
+            event_type = event.get('event_type', '')
+
+            if event_type == 'down':  # Only process key down events
+                if key in ['up', 'down']:
+                    await self._handle_special_key(f"key_{key}")
                 else:
-                    await self._execute_macro(self.key_mapping[key])
+                    # Execute the corresponding macro
+                    await self._execute_gcode(f"_{key.upper()}")
+
             return {'status': "ok"}
+
         except Exception as e:
-            self.logger.exception(f"Error handling numpad event: {str(e)}")
+            self.logger.exception(f"Error processing numpad event: {str(e)}")
             return {'status': "error", 'message': str(e)}
 
     async def _handle_special_key(self, key):
-        await self._update_printer_state()
-        if key == 'key_up':
-            await self._handle_up()
-        elif key == 'key_down':
-            await self._handle_down()
-
-    async def _update_printer_state(self):
+        # Get printer status
         try:
-            result = await self.printer.run_method("info")
-            self.is_printing = result.get('state') == 'printing'
-            if "toolhead" in result:
-                self.current_z = result["toolhead"]["position"][2]
-            self.is_probing = await self.printer.run_method("gcode.check_probe_status")
+            status = await self.klippy_apis.query_objects(
+                {'print_stats': None, 'toolhead': None}
+            )
+
+            self.is_printing = status.get('print_stats', {}).get('state', '') == 'printing'
+            self.current_z = status.get('toolhead', {}).get('position', [0, 0, 0, 0])[2]
+
+            if key == 'key_up':
+                if self.current_z < 1.0 and self.is_printing:
+                    await self._adjust_z(self.z_adjust_increment)
+                else:
+                    await self._adjust_speed(self.speed_adjust_increment)
+            elif key == 'key_down':
+                if self.current_z < 1.0 and self.is_printing:
+                    await self._adjust_z(-self.z_adjust_increment)
+                else:
+                    await self._adjust_speed(-self.speed_adjust_increment)
+
         except Exception as e:
-            self.logger.error(f"Error updating printer state: {str(e)}")
-            self.is_printing = False
-            self.is_probing = False
+            self.logger.exception(f"Error handling special key: {str(e)}")
 
-    async def _handle_up(self):
-        if self.is_probing:
-            await self._probe_up()
-        elif self.is_printing:
-            if self.current_z < 1.0:
-                await self._z_adjust_up()
-            else:
-                await self._speed_adjust_up()
-        else:
-            await self._execute_macro(self.key_mapping['key_up'])
-
-    async def _handle_down(self):
-        if self.is_probing:
-            await self._probe_down()
-        elif self.is_printing:
-            if self.current_z < 1.0:
-                await self._z_adjust_down()
-            else:
-                await self._speed_adjust_down()
-        else:
-            await self._execute_macro(self.key_mapping['key_down'])
-
-    async def _execute_macro(self, macro_name):
+    async def _execute_gcode(self, command):
         try:
-            self._log_debug(f"Executing macro: {macro_name}")
-            await self.printer.run_method("gcode.script", script=macro_name)
+            await self.klippy_apis.run_gcode(command)
         except Exception as e:
-            self.logger.error(f"Error executing macro {macro_name}: {str(e)}")
+            self.logger.exception(f"Error executing gcode {command}: {str(e)}")
 
-    async def _probe_up(self):
-        if self.current_z < 0.1:
-            await self._execute_macro("TESTZ Z=+")
-        else:
-            step_size = max(self.current_z / 2, 0.01)
-            await self._execute_macro(f"TESTZ Z=+{step_size}")
-
-    async def _probe_down(self):
-        if self.current_z < 0.1:
-            await self._execute_macro("TESTZ Z=-")
-        else:
-            step_size = max(self.current_z / 2, 0.01)
-            await self._execute_macro(f"TESTZ Z=-{step_size}")
-
-    async def _z_adjust_up(self):
-        await self._execute_macro(f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1")
-
-    async def _z_adjust_down(self):
-        await self._execute_macro(f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1")
-
-    async def _speed_adjust_up(self):
+    async def _adjust_z(self, adjustment):
         try:
-            current_status = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
-            current_factor = current_status["speed_factor"]
-            new_factor = min(current_factor + self.speed_adjust_increment, self.max_speed_factor)
-            await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
+            cmd = f"SET_GCODE_OFFSET Z_ADJUST={adjustment} MOVE=1"
+            await self.klippy_apis.run_gcode(cmd)
         except Exception as e:
-            self.logger.error(f"Error adjusting speed up: {str(e)}")
+            self.logger.exception(f"Error adjusting Z: {str(e)}")
 
-    async def _speed_adjust_down(self):
+    async def _adjust_speed(self, adjustment):
         try:
-            current_status = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
-            current_factor = current_status["speed_factor"]
-            new_factor = max(current_factor - self.speed_adjust_increment, self.min_speed_factor)
-            await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
-        except Exception as e:
-            self.logger.error(f"Error adjusting speed down: {str(e)}")
+            current = await self.klippy_apis.query_objects({'gcode_move': None})
+            current_factor = current.get('gcode_move', {}).get('speed_factor', 1.0)
+            new_factor = max(self.min_speed_factor,
+                             min(current_factor + adjustment, self.max_speed_factor))
 
+            cmd = f"SET_VELOCITY_FACTOR FACTOR={new_factor}"
+            await self.klippy_apis.run_gcode(cmd)
+        except Exception as e:
+            self.logger.exception(f"Error adjusting speed: {str(e)}")
+
+    def get_status(self, eventtime=None):
+        return {
+            'is_printing': self.is_printing,
+            'current_z': self.current_z,
+            'debug_enabled': self.debug_log
+        }
 
 def load_component(config):
     return NumpadMacros(config)
