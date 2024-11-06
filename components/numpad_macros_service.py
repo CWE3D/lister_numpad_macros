@@ -1,6 +1,6 @@
 import logging
 
-class NumpadMacros:
+class NumpadMacrosService:
     def __init__(self, config):
         self.server = config.get_server()
         self.printer = self.server.lookup_component('printer')
