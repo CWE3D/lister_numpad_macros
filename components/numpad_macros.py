@@ -4,12 +4,12 @@
 from __future__ import annotations
 import logging
 
+
 class NumpadMacros:
     def __init__(self, config):
         # Core initialization
         self.server = config.get_server()
         self.name = config.get_name()
-        # Get root logger
         self.logger = logging.getLogger(self.name)
 
         # Get configuration options
@@ -20,7 +20,6 @@ class NumpadMacros:
         self.max_speed_factor = config.getfloat('max_speed_factor', 2.0)
 
         # State tracking
-        self.printer = None
         self.klippy_apis = None
         self.is_printing = False
         self.is_probing = False
@@ -40,12 +39,15 @@ class NumpadMacros:
             self.logger.debug("NumpadMacros component initialized")
 
     async def component_init(self):
-        # Get printer APIs - these are only available after initialization
-        self.printer = self.server.lookup_component('printer')
+        # Get klippy APIs
         self.klippy_apis = self.server.lookup_component('klippy_apis')
+        await self.klippy_apis.wait_started()
         self.logger.info("NumpadMacros component initialization complete")
 
     async def _handle_numpad_event(self, web_request):
+        if not self.klippy_apis.is_ready():
+            return {'status': "error", 'message': "Klippy not ready"}
+
         event = web_request.get_json_body()
         if self.debug_log:
             self.logger.debug(f"Received numpad event: {event}")
@@ -68,7 +70,6 @@ class NumpadMacros:
             return {'status': "error", 'message': str(e)}
 
     async def _handle_special_key(self, key):
-        # Get printer status
         try:
             status = await self.klippy_apis.query_objects(
                 {'print_stats': None, 'toolhead': None}
@@ -122,6 +123,7 @@ class NumpadMacros:
             'current_z': self.current_z,
             'debug_enabled': self.debug_log
         }
+
 
 def load_component(config):
     return NumpadMacros(config)
