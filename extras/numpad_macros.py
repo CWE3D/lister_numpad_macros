@@ -45,6 +45,16 @@ class NumpadMacros:
         self.z_adjust_increment = 0.01  # 0.01mm per click
         self.pending_z_adjust = False
 
+
+        # Add speed control settings
+        self.speed_adjust_increment = 0.05  # 5% per click
+        self.min_speed_factor = 0.2  # 20% minimum speed
+        self.max_speed_factor = 2.0  # 200% maximum speed
+        self.speed_adjust_accumulator = 0.0
+        self.last_speed_adjust_time = 0
+        self.speed_adjust_timeout = 1.0  # 1 second timeout
+        self.pending_speed_adjust = False
+
         # Add tracking for last event across all devices
         self.last_global_event_time = 0
         self.last_global_event_code = None
@@ -106,6 +116,50 @@ class NumpadMacros:
         for thread in self.input_threads.values():
             if thread.is_alive():
                 thread.join(timeout=1.0)
+
+    def _handle_speed_adjustment(self, direction: str) -> None:
+        """Handle print speed adjustments with accumulation"""
+        try:
+            current_factor = self.printer.lookup_object('gcode_move').speed_factor
+            adjustment = self.speed_adjust_increment if direction == 'up' else -self.speed_adjust_increment
+            new_factor = current_factor + adjustment
+
+            # Clamp to min/max values
+            new_factor = max(self.min_speed_factor, min(new_factor, self.max_speed_factor))
+
+            self.speed_adjust_accumulator = new_factor
+            self.last_speed_adjust_time = time.time()
+            self.pending_speed_adjust = True
+
+            self._debug_log(
+                f"Speed adjustment queued: {new_factor * 100:.1f}% "
+                f"(direction: {direction}, current: {current_factor * 100:.1f}%)"
+            )
+
+            # Schedule check for timeout
+            self.reactor.register_callback(
+                lambda e: self._check_and_apply_speed_adjustment(),
+                self.reactor.monotonic() + self.speed_adjust_timeout
+            )
+
+        except Exception as e:
+            self._debug_log(f"Error adjusting print speed: {str(e)}")
+
+    def _check_and_apply_speed_adjustment(self) -> None:
+        """Apply accumulated speed adjustment after timeout"""
+        current_time = time.time()
+        if (current_time - self.last_speed_adjust_time >= self.speed_adjust_timeout and
+                self.pending_speed_adjust):
+
+            try:
+                command = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={self.speed_adjust_accumulator}"
+                self.gcode.run_script_from_command(command)
+                self._debug_log(f"Applied speed adjustment: {self.speed_adjust_accumulator * 100:.1f}%")
+            except Exception as e:
+                self._debug_log(f"Error applying speed adjustment: {str(e)}")
+
+            # Reset pending state
+            self.pending_speed_adjust = False
 
     def _check_and_apply_z_adjustment(self) -> None:
         """Apply accumulated Z adjustment after timeout"""
@@ -249,14 +303,12 @@ class NumpadMacros:
                     time.sleep(DEFAULT_RETRY_DELAY)
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
-        """Handle key press events with enhanced debugging"""
         try:
             # Show key press in console
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
             # Special handling for knob inputs
             if key in ['key_up', 'key_down']:
-                # Check if we're in first layer adjustment mode
                 try:
                     printing = self.printer.lookup_object('virtual_sdcard').is_active()
                     if printing:
@@ -264,7 +316,7 @@ class NumpadMacros:
                         toolhead = self.printer.lookup_object('toolhead')
                         current_z = toolhead.get_position()[2]
 
-                        if current_z < 1.0:  # First layer
+                        if current_z < 1.0:  # First layer - handle Z adjustment
                             # Update accumulator based on direction
                             adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
                             self.z_adjust_accumulator += adjustment
@@ -281,7 +333,9 @@ class NumpadMacros:
                                 lambda e: self._check_and_apply_z_adjustment(),
                                 self.reactor.monotonic() + self.z_adjust_timeout
                             )
-                            return
+                        else:  # Beyond first layer - handle speed adjustment
+                            self._handle_speed_adjustment('up' if key == 'key_up' else 'down')
+                        return
                 except Exception as e:
                     self._debug_log(f"Error checking print state: {str(e)}")
 
@@ -439,7 +493,10 @@ class NumpadMacros:
             'pending_key': self.pending_key,
             'z_adjust_accumulator': self.z_adjust_accumulator,
             'pending_z_adjust': self.pending_z_adjust,
-            'last_z_adjust_time': self.last_z_adjust_time
+            'last_z_adjust_time': self.last_z_adjust_time,
+            'speed_adjust_accumulator': self.speed_adjust_accumulator,
+            'pending_speed_adjust': self.pending_speed_adjust,
+            'last_speed_adjust_time': self.last_speed_adjust_time
         }
 
 
