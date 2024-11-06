@@ -1,5 +1,3 @@
-from moonraker import component_init_wrapper
-
 class NumpadMacrosService:
     def __init__(self, config):
         self.server = config.get_server()
@@ -47,7 +45,6 @@ class NumpadMacrosService:
 
         self.logger.info("NumpadMacros initialized")
 
-    @component_init_wrapper
     async def component_init(self):
         # Perform any asynchronous initialization here
         self.logger.info("NumpadMacros component initialization complete")
