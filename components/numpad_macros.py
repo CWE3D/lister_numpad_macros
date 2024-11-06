@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from ..common import WebRequest
     from .klippy_apis import KlippyAPI
     from .job_state import JobState
+    from .klippy_connection import KlippyConnection
 
 class NumpadMacros:
     def __init__(self, config: ConfigHelper) -> None:
@@ -156,10 +157,10 @@ class NumpadMacros:
 
     async def _check_klippy_ready(self) -> bool:
         """Verify Klippy is ready to process commands"""
-        job_state: JobState = self.server.lookup_component('job_state')
+        klippy_conn: KlippyConnection = self.server.lookup_component('klippy_connection')
         return (
-            self.kapis.is_connected() and
-            not job_state.is_shutdown()
+                klippy_conn.is_connected() and
+                klippy_conn.is_ready()
         )
 
     async def _handle_special_key(self, key: str) -> None:
