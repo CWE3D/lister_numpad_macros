@@ -86,6 +86,11 @@ class NumpadMacros:
         self.devices: Dict[str, InputDevice] = {}
         self.input_threads: Dict[str, threading.Thread] = {}
 
+        # Add rate limiting for print state checks
+        self._last_print_check_time = 0
+        self._print_state_cache_timeout = 1.0  # Cache print state for 1 second
+        self._is_printing = False
+
         # Key options array is referenced but not defined in the initialization
         self.key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
@@ -161,9 +166,11 @@ class NumpadMacros:
 
         while not self._thread_exit.is_set():
             try:
+                # Use select with timeout to avoid busy waiting
                 r, w, x = select.select([device.fileno()], [], [], DEFAULT_READ_TIMEOUT)
                 if not r:
-                    time.sleep(0.1)  # Add sleep when no events
+                    # No events - sleep to reduce CPU usage
+                    time.sleep(0.1)
                     continue
 
                 for event in device.read():
@@ -212,8 +219,18 @@ class NumpadMacros:
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
         try:
-            # Always show key press in console for debugging
-            self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
+            # First check if printing - this uses cached state
+            if self._check_printing_state():
+                # Check if key is in allowed list for printing
+                if key not in self.print_allowed_keys:
+                    self._debug_log(f"Ignoring key {key} during printing (not in allowed list)")
+                    return
+
+                # Don't execute query commands during printing
+                command = self.command_mapping.get(key)
+                if command and command.startswith('_'):
+                    self._debug_log(f"Ignoring query command during printing: {command}")
+                    return
 
             # Handle knob inputs first
             if key in ['key_up', 'key_down']:
