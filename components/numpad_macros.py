@@ -39,10 +39,17 @@ class NumpadMacros:
             self.logger.debug("NumpadMacros component initialized")
 
     async def component_init(self):
-        # Get klippy APIs
-        self.klippy_apis = self.server.lookup_component('klippy_apis')
-        await self.klippy_apis.wait_started()
-        self.logger.info("NumpadMacros component initialization complete")
+        try:
+            # Get klippy APIs, no need to wait for any initialization
+            self.klippy_apis = self.server.lookup_component('klippy_apis')
+            if not self.klippy_apis:
+                raise RuntimeError("Klippy APIs component not found")
+
+            # Log successful initialization
+            self.logger.info("NumpadMacros component initialization complete")
+
+        except Exception as e:
+            self.logger.exception(f"Error during component initialization: {str(e)}")
 
     async def _handle_numpad_event(self, web_request):
         if not self.klippy_apis.is_ready():
