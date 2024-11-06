@@ -129,7 +129,7 @@ class NumpadMacros:
             raise self.server.error("Klippy not ready", 503)
 
         try:
-            event: Dict[str, Any] = web_request.get_json_body()
+            event = web_request.get_args()
             if self.debug_log:
                 logging.debug(f"{self.name}: Received event: {event}")
 
