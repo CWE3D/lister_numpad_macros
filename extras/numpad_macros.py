@@ -11,7 +11,6 @@ DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_DELAY = 1.0
 DEFAULT_DEBOUNCE_TIME = 0.3
 
-
 class NumpadMacros:
     def __init__(self, config) -> None:
         self.printer = config.get_printer()
