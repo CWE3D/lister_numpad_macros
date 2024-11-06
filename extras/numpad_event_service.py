@@ -24,7 +24,7 @@ logger.addHandler(handler)
 def send_to_moonraker(event_data):
     """Send key event data to Moonraker"""
     try:
-        response = requests.post(f"{MOONRAKER_URL}/server/numpad_event", json=event_data)
+        response = requests.post(f"{MOONRAKER_URL}/server/numpad/event", json=event_data)
         response.raise_for_status()
         logger.info(f"Sent event data to Moonraker: {event_data}")
     except requests.RequestException as e:
