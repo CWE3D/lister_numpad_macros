@@ -2,7 +2,7 @@ class NumpadMacros:
     def __init__(self, config):
         self.server = config.get_server()
         self.config = config
-        self.logger = config.get_logger()
+        self.logger = self.server.get_logger()
         self.name = config.get_name()
 
         # Configuration
