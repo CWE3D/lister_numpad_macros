@@ -41,15 +41,15 @@ class NumpadMacros:
         # Z adjustment accumulation settings
         self.z_adjust_accumulator = 0.0
         self.last_z_adjust_time = 0
-        self.z_adjust_timeout = 1.0  # 1 second timeout
-        self.z_adjust_increment = 0.01  # 0.01mm per click
+        self.z_adjust_timeout = config.getfloat('z_adjust_timeout', 1.0)  # Make timeout configurable
+        self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)  # Make increment configurable
+        self.z_adjust_max_per_period = config.getfloat('z_adjust_max_per_period', 0.1)  # Make max adjustment
         self.pending_z_adjust = False
 
-
         # Add speed control settings
-        self.speed_adjust_increment = 0.05  # 5% per click
-        self.min_speed_factor = 0.2  # 20% minimum speed
-        self.max_speed_factor = 2.0  # 200% maximum speed
+        self.speed_adjust_increment = config.getfloat('speed_adjust_increment', 0.05)  # 5% per click
+        self.min_speed_factor = config.getfloat('min_speed_factor', 0.2)  # 20% minimum speed
+        self.max_speed_factor = config.getfloat('max_speed_factor', 2.0)
         self.speed_adjust_accumulator = 0.0
         self.last_speed_adjust_time = 0
         self.speed_adjust_timeout = 1.0  # 1 second timeout
@@ -165,8 +165,10 @@ class NumpadMacros:
         """Apply accumulated Z adjustment after timeout"""
         current_time = time.time()
         if (current_time - self.last_z_adjust_time >= self.z_adjust_timeout and
-                self.pending_z_adjust and
-                self.z_adjust_accumulator != 0):
+                self.pending_z_adjust):  # Removed the != 0 check
+
+            # Add debug logging to see the value right before applying
+            self._debug_log(f"About to apply Z adjustment, current accumulator: {self.z_adjust_accumulator:.3f}mm")
 
             # Format command with accumulated adjustment
             command = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_accumulator:.3f} MOVE=1"
@@ -317,15 +319,32 @@ class NumpadMacros:
                         current_z = toolhead.get_position()[2]
 
                         if current_z < 1.0:  # First layer - handle Z adjustment
-                            # Update accumulator based on direction
+                            # Calculate potential new adjustment
                             adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
-                            self.z_adjust_accumulator += adjustment
+                            potential_adjustment = self.z_adjust_accumulator + adjustment
+
+                            # Apply safety limits
+                            if abs(potential_adjustment) > self.z_adjust_max_per_period:
+                                self._debug_log(
+                                    f"Safety limit reached: attempted adjustment {potential_adjustment:.3f}mm "
+                                    f"exceeds maximum {self.z_adjust_max_per_period}mm per period"
+                                )
+                                # Clamp to maximum allowed value while preserving direction
+                                potential_adjustment = (
+                                    self.z_adjust_max_per_period if potential_adjustment > 0
+                                    else -self.z_adjust_max_per_period
+                                )
+
+                            # Apply the safe adjustment
+                            old_value = self.z_adjust_accumulator
+                            self.z_adjust_accumulator = potential_adjustment
                             self.last_z_adjust_time = time.time()
                             self.pending_z_adjust = True
 
                             self._debug_log(
-                                f"Accumulated Z adjustment: {self.z_adjust_accumulator:.3f}mm "
-                                f"(added {adjustment:+.3f}mm)"
+                                f"Z adjustment (safety limited): old={old_value:.3f}mm, "
+                                f"new={self.z_adjust_accumulator:.3f}mm "
+                                f"(added {adjustment:+.3f}mm, max per period: ±{self.z_adjust_max_per_period}mm)"
                             )
 
                             # Schedule check for timeout
