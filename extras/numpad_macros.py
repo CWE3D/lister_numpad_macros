@@ -85,11 +85,6 @@ class NumpadMacros:
         self.devices: Dict[str, InputDevice] = {}
         self.input_threads: Dict[str, threading.Thread] = {}
 
-        # Register event handlers
-        self.printer.register_event_handler("klippy:connect", self.handle_connect)
-        self.printer.register_event_handler("klippy:shutdown", self.handle_shutdown)
-        self.printer.register_event_handler('moonraker:connected', self.handle_moonraker_connected)
-
         # Register commands
         self.gcode.register_command(
             'NUMPAD_TEST',
@@ -364,32 +359,78 @@ class NumpadMacros:
                         time.sleep(DEFAULT_RETRY_DELAY)
 
 
-def handle_shutdown(self) -> None:
-    """Clean up resources during shutdown"""
-    self._is_shutdown = True
-    self._thread_exit.set()
+    def handle_shutdown(self) -> None:
+        """Clean up resources during shutdown"""
+        self._is_shutdown = True
+        self._thread_exit.set()
 
-    for device_path, device in self.devices.items():
+        for device_path, device in self.devices.items():
+            try:
+                device.close()
+            except Exception as e:
+                self._debug_log(f"Error closing device {device_path}: {str(e)}")
+
+        for thread in self.input_threads.values():
+            if thread.is_alive():
+                thread.join(timeout=1.0)
+
+
+    def handle_moonraker_connected(self) -> None:
+        """Handle Moonraker connection event"""
+        self._debug_log("Moonraker connected")
+        self.send_status_to_moonraker()
+
+
+    def send_status_to_moonraker(self) -> None:
+        """Send current status to Moonraker"""
         try:
-            device.close()
+            status = {
+                'command_mapping': self.command_mapping,
+                'connected_devices': {
+                    path: device.name for path, device in self.devices.items()
+                },
+                'debug_enabled': self.debug_log,
+                'pending_key': self.pending_key,
+                'z_adjust_accumulator': self.z_adjust_accumulator,
+                'pending_z_adjust': self.pending_z_adjust
+            }
+            self.printer.send_event("numpad:status_update", json.dumps(status))
+            self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
         except Exception as e:
-            self._debug_log(f"Error closing device {device_path}: {str(e)}")
-
-    for thread in self.input_threads.values():
-        if thread.is_alive():
-            thread.join(timeout=1.0)
+            self._debug_log(f"Error sending status to Moonraker: {str(e)}")
 
 
-def handle_moonraker_connected(self) -> None:
-    """Handle Moonraker connection event"""
-    self._debug_log("Moonraker connected")
-    self.send_status_to_moonraker()
+    def cmd_NUMPAD_TEST(self, gcmd) -> None:
+        """Handle NUMPAD_TEST command"""
+        self._debug_log("Running NUMPAD_TEST command")
 
+        responses = [
+            "NumpadMacrosClient test command received",
+            f"Debug logging: {'enabled' if self.debug_log else 'disabled'}",
+            f"Pending key: {self.pending_key or 'None'}",
+            f"Z adjustment accumulator: {self.z_adjust_accumulator:.3f}mm",
+            f"Pending Z adjustment: {'Yes' if self.pending_z_adjust else 'No'}"
+        ]
 
-def send_status_to_moonraker(self) -> None:
-    """Send current status to Moonraker"""
-    try:
-        status = {
+        if self.devices:
+            for path, device in self.devices.items():
+                responses.extend([
+                    f"Connected device: {device.name}",
+                    f"Path: {path}"
+                ])
+            responses.extend([
+                "Current command mapping:",
+                json.dumps(self.command_mapping, indent=2)
+            ])
+        else:
+            responses.append("No input devices connected")
+
+        for response in responses:
+            gcmd.respond_info(response)
+
+    def get_status(self, eventtime: float = None) -> Dict[str, Any]:
+        """Return current status"""
+        return {
             'command_mapping': self.command_mapping,
             'connected_devices': {
                 path: device.name for path, device in self.devices.items()
@@ -397,55 +438,9 @@ def send_status_to_moonraker(self) -> None:
             'debug_enabled': self.debug_log,
             'pending_key': self.pending_key,
             'z_adjust_accumulator': self.z_adjust_accumulator,
-            'pending_z_adjust': self.pending_z_adjust
+            'pending_z_adjust': self.pending_z_adjust,
+            'last_z_adjust_time': self.last_z_adjust_time
         }
-        self.printer.send_event("numpad:status_update", json.dumps(status))
-        self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
-    except Exception as e:
-        self._debug_log(f"Error sending status to Moonraker: {str(e)}")
-
-
-def cmd_NUMPAD_TEST(self, gcmd) -> None:
-    """Handle NUMPAD_TEST command"""
-    self._debug_log("Running NUMPAD_TEST command")
-
-    responses = [
-        "NumpadMacrosClient test command received",
-        f"Debug logging: {'enabled' if self.debug_log else 'disabled'}",
-        f"Pending key: {self.pending_key or 'None'}",
-        f"Z adjustment accumulator: {self.z_adjust_accumulator:.3f}mm",
-        f"Pending Z adjustment: {'Yes' if self.pending_z_adjust else 'No'}"
-    ]
-
-    if self.devices:
-        for path, device in self.devices.items():
-            responses.extend([
-                f"Connected device: {device.name}",
-                f"Path: {path}"
-            ])
-        responses.extend([
-            "Current command mapping:",
-            json.dumps(self.command_mapping, indent=2)
-        ])
-    else:
-        responses.append("No input devices connected")
-
-    for response in responses:
-        gcmd.respond_info(response)
-
-def get_status(self, eventtime: float = None) -> Dict[str, Any]:
-    """Return current status"""
-    return {
-        'command_mapping': self.command_mapping,
-        'connected_devices': {
-            path: device.name for path, device in self.devices.items()
-        },
-        'debug_enabled': self.debug_log,
-        'pending_key': self.pending_key,
-        'z_adjust_accumulator': self.z_adjust_accumulator,
-        'pending_z_adjust': self.pending_z_adjust,
-        'last_z_adjust_time': self.last_z_adjust_time
-    }
 
 
 def load_config(config):
