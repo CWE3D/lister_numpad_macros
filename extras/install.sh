@@ -24,7 +24,7 @@ fi
 echo -e "${GREEN}Starting Numpad Listener Service Installation...${NC}"
 
 # Create installation directory
-INSTALL_DIR="/home/pi/lister_numpad_macros"
+INSTALL_DIR="/home/pi/lister_numpad_macros/extras"
 
 # Copy service file to installation directory
 chmod +x $INSTALL_DIR/numpad_event_service.py
@@ -40,7 +40,7 @@ Wants=moonraker.service
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/python3 /home/pi/lister_numpad_macros/numpad_event_service.py
+ExecStart=/usr/bin/python3 /home/pi/lister_numpad_macros/extras/numpad_event_service.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
@@ -55,7 +55,7 @@ apt-get update
 apt-get install -y python3-pip
 
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
-pip3 install keyboard==0.13.5 requests==2.31.0
+pip3 install keyboard==0.13.5 requests==2.32.0
 
 # Enable and start the service
 echo -e "${YELLOW}Enabling and starting the service...${NC}"
