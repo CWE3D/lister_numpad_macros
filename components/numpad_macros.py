@@ -52,14 +52,20 @@ class NumpadMacros:
             self.logger.exception(f"Error during component initialization: {str(e)}")
 
     async def _handle_numpad_event(self, web_request):
-        if not self.klippy_apis.is_ready():
-            return {'status': "error", 'message': "Klippy not ready"}
-
-        event = web_request.get_json_body()
-        if self.debug_log:
-            self.logger.debug(f"Received numpad event: {event}")
-
         try:
+            # Query important Klippy objects such as 'toolhead' or 'print_stats' to check readiness
+            status = await self.klippy_apis.query_objects({'print_stats': None, 'toolhead': None})
+
+            # Check if Klippy is in a state that allows processing (e.g., if it's printing or ready)
+            klippy_state = status.get('print_stats', {}).get('state', '')
+            if klippy_state not in ['printing', 'paused']:  # Adjust this as per your needs
+                return {'status': "error", 'message': "Klippy not in a ready state"}
+
+            # Process event payload from web request
+            event = web_request.get_json_body()
+
+            # Continue handling the numpad event
+            self.logger.debug(f"Received numpad event: {event}")
             key = event.get('key', '')
             event_type = event.get('event_type', '')
 
