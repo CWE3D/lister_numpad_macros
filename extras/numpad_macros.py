@@ -1,692 +1,229 @@
 from __future__ import annotations
-import evdev
-from evdev import InputDevice, categorize, ecodes
+import keyboard
 import threading
 import logging
 import json
 import time
-import select
-from typing import Dict, Optional, Any, Union, List
+from typing import Dict, Optional, Any
 
 # Constants
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_DELAY = 1.0
-DEFAULT_READ_TIMEOUT = 0.5  # Increased from 0.1
-DEFAULT_DEVICE_PATH = '/dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01'
+DEFAULT_DEBOUNCE_TIME = 0.3
 
 
 class NumpadMacros:
     def __init__(self, config) -> None:
-        # Initialize basic objects
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
-        self.query_prefix = config.get('query_prefix', '_QUERY')
-
-        # Register event handlers
-        self.printer.register_event_handler("klippy:connect", self.handle_connect)
-        self.printer.register_event_handler("klippy:disconnect", self.handle_disconnect)
-        self.printer.register_event_handler('moonraker:connected', self.handle_moonraker_connected)
-
-        # Get configuration values - must set debug_log early
         self.debug_log = config.getboolean('debug_log', False)
 
-        # Get device paths
-        device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
-        self.device_paths = [path.strip() for path in device_paths]
-
-        # Add configuration for keys that don't require confirmation
-        default_no_confirm = "key_up,key_down"  # Default keys that don't need confirmation
-        no_confirm_str = config.get('no_confirm_keys', default_no_confirm)
-        self.no_confirm_keys = [key.strip() for key in no_confirm_str.split(',') if key.strip()]
-
-        # Add configuration for keys allowed during printing
-        default_print_allowed = "key_dot,key_dot_alt,key_grave,key_enter,key_enter_alt"
-        print_allowed_str = config.get('print_allowed_keys', default_print_allowed)
-        self.print_allowed_keys = [key.strip() for key in print_allowed_str.split(',') if key.strip()]
-        self._debug_log(f"Keys allowed during printing: {self.print_allowed_keys}")
-
-        # Add tracking for last event across all devices
-        self.last_global_event_time = 0
-        self.last_global_event_code = None
-        self.global_debounce_time = 0.3  # 300ms global debounce
-
-        # Initialize key mapping
-        self.key_mapping = self._initialize_key_mapping()
-
-        # Add pending key tracking
-        self.pending_key: Optional[str] = None
-
-        # State management
-        self._is_shutdown = False
-        self._thread_exit = threading.Event()
-        self.devices: Dict[str, InputDevice] = {}
-        self.input_threads: Dict[str, threading.Thread] = {}
-
-        # Single source of truth for state management
+        # Initialize state
         self._state = {
             'is_printing': False,
-            'last_print_check_time': 0.0,
-            'print_state_cache_timeout': 1.0,
-            'last_toolhead_position': None,
-            'last_speed_factor': None,
-            'position_check_time': 0.0,
-            'position_check_interval': 1.0,
-            # Add Z adjustment state
+            'last_event_time': 0,
+            'last_event_key': None,
             'z_adjust_accumulator': 0.0,
-            'z_total_offset': 0.0,
-            'last_z_adjust_time': 0.0,
             'pending_z_adjust': False,
-            # Add speed control state
+            'last_z_adjust_time': 0.0,
             'speed_adjust_accumulator': 0.0,
-            'last_speed_adjust_time': 0.0,
             'pending_speed_adjust': False,
-            # Add constants from config
-            'z_adjust_timeout': config.getfloat('z_adjust_timeout', 1.0),
+            'last_speed_adjust_time': 0.0,
             'z_adjust_increment': config.getfloat('z_adjust_increment', 0.01),
-            'z_adjust_max_per_period': config.getfloat('z_adjust_max_per_period', 0.1),
             'speed_adjust_increment': config.getfloat('speed_adjust_increment', 0.05),
             'min_speed_factor': config.getfloat('min_speed_factor', 0.2),
-            'max_speed_factor': config.getfloat('max_speed_factor', 2.0),
-            'speed_adjust_timeout': 1.0
+            'max_speed_factor': config.getfloat('max_speed_factor', 2.0)
         }
 
-        # Use a lock for state changes
         self._state_lock = threading.Lock()
+        self.pending_key: Optional[str] = None
+        self._is_shutdown = False
 
-        # Key options array is referenced but not defined in the initialization
-        self.key_options = [
-            'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
-            'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
-            'key_dot', 'key_enter', 'key_grave',
-            'key_1_alt', 'key_2_alt', 'key_3_alt',
-            'key_4_alt', 'key_5_alt', 'key_6_alt',
-            'key_7_alt', 'key_8_alt', 'key_9_alt',
-            'key_0_alt', 'key_dot_alt', 'key_enter_alt',
-            'key_up', 'key_down',
-        ]
+        # Key mappings
+        self.key_mapping = {
+            'num_1': 'key_1',
+            'num_2': 'key_2',
+            'num_3': 'key_3',
+            'num_4': 'key_4',
+            'num_5': 'key_5',
+            'num_6': 'key_6',
+            'num_7': 'key_7',
+            'num_8': 'key_8',
+            'num_9': 'key_9',
+            'num_0': 'key_0',
+            'num_decimal': 'key_dot',
+            'num_enter': 'key_enter',
+            'volume up': 'key_up',
+            'volume down': 'key_down'
+        }
 
-        # Initialize command mapping
+        # Command mapping (from config)
         self.command_mapping = {}
-        for key in self.key_options:
-            self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned yet\"")
+        for key in self.key_mapping.values():
+            self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
+
+        # Register events
+        self.printer.register_event_handler("klippy:connect", self.handle_connect)
+        self.printer.register_event_handler("klippy:disconnect", self.handle_disconnect)
 
         # Register commands
-        self.gcode.register_command(
-            'NUMPAD_TEST',
-            self.cmd_NUMPAD_TEST,
-            desc="Test numpad functionality and display current configuration"
-        )
+        self.gcode.register_command('NUMPAD_TEST', self.cmd_NUMPAD_TEST,
+                                    desc="Test numpad functionality")
 
-    def _handle_printing_started(self):
-        with self._state_lock:
-            self._state['is_printing'] = True
-            self._state['last_print_check_time'] = time.time()
+        # Define keys that don't need confirmation
+        self.no_confirm_keys = {'key_up', 'key_down'}
 
-    def _handle_printing_ended(self):
-        with self._state_lock:
-            self._state['is_printing'] = False
-            self._state['last_print_check_time'] = time.time()
+        # Define keys allowed during printing
+        self.print_allowed_keys = {'key_dot', 'key_enter', 'key_up', 'key_down'}
 
-    def _check_printing_state(self) -> bool:
-        """Thread-safe print state check with caching"""
-        with self._state_lock:
-            current_time = time.time()
-            if current_time - self._state['last_print_check_time'] > self._state['print_state_cache_timeout']:
-                try:
-                    self._state['is_printing'] = self.printer.lookup_object('virtual_sdcard').is_active()
-                    self._state['last_print_check_time'] = current_time
-                except Exception as e:
-                    self._debug_log(f"Error checking print state: {str(e)}")
-            return self._state['is_printing']
-
-    def _check_z_position(self) -> float:
-        """Cache and check Z position with rate limiting"""
-        current_time = time.time()
-        if current_time - self._state['position_check_time'] >= self._state['position_check_interval']:
-            try:
-                toolhead = self.printer.lookup_object('toolhead')
-                self._state['last_toolhead_position'] = toolhead.get_position()
-                self._state['position_check_time'] = current_time
-            except Exception as e:
-                self._debug_log(f"Error checking position: {str(e)}")
-
-        return self._state['last_toolhead_position'][2] if self._state['last_toolhead_position'] else 0.0
-
-    # Update the methods that handle Z adjustment:
-    def _check_and_apply_z_adjustment(self) -> None:
-        """Apply accumulated Z adjustment after timeout with proper state locking"""
-        with self._state_lock:
-            current_time = time.time()
-            if (current_time - self._state['last_z_adjust_time'] >= self._state['z_adjust_timeout'] and
-                    self._state['pending_z_adjust']):
-
-                adjustment = self._state['z_adjust_accumulator']
-
-                self._debug_log(f"Applying Z adjustment - adjustment: {adjustment:.3f}mm")
-
-                if adjustment > 0:
-                    command = f"SET_GCODE_OFFSET Z={adjustment:.3f} MOVE=1"
-                else:
-                    command = f"SET_GCODE_OFFSET Z=-{abs(adjustment):.3f} MOVE=1"
-
-                try:
-                    self.gcode.run_script_from_command(command)
-                except Exception as e:
-                    self._debug_log(f"Error applying Z adjustment: {str(e)}")
-
-                # Reset state
-                self._state['z_adjust_accumulator'] = 0.0
-                self._state['pending_z_adjust'] = False
-
-    def _handle_first_layer_adjustment(self, key: str) -> None:
-        """Handle first layer adjustments with state locking"""
-        with self._state_lock:
-            adjustment = (self._state['z_adjust_increment']
-                          if key == 'key_up' else -self._state['z_adjust_increment'])
-            potential_adjustment = self._state['z_adjust_accumulator'] + adjustment
-
-            if abs(potential_adjustment) <= self._state['z_adjust_max_per_period']:
-                self._state['z_adjust_accumulator'] = potential_adjustment
-                self._state['last_z_adjust_time'] = time.time()
-                self._state['pending_z_adjust'] = True
-
-                self.reactor.register_callback(
-                    lambda e: self._check_and_apply_z_adjustment(),
-                    self.reactor.monotonic() + self._state['z_adjust_timeout']
-                )
-
-    # Update the speed adjustment methods:
-    def _handle_speed_adjustment(self, direction: str) -> None:
-        """Handle speed adjustments with state locking"""
-        with self._state_lock:
-            try:
-                current_factor = self.printer.lookup_object('gcode_move').speed_factor
-                adjustment = (self._state['speed_adjust_increment']
-                              if direction == 'up' else -self._state['speed_adjust_increment'])
-                new_factor = current_factor + adjustment
-
-                # Clamp to min/max values
-                new_factor = max(self._state['min_speed_factor'],
-                                 min(new_factor, self._state['max_speed_factor']))
-
-                self._state['speed_adjust_accumulator'] = new_factor
-                self._state['last_speed_adjust_time'] = time.time()
-                self._state['pending_speed_adjust'] = True
-
-                self._debug_log(
-                    f"Speed adjustment queued: {new_factor * 100:.1f}% "
-                    f"(direction: {direction}, current: {current_factor * 100:.1f}%)"
-                )
-
-                self.reactor.register_callback(
-                    lambda e: self._check_and_apply_speed_adjustment(),
-                    self.reactor.monotonic() + self._state['speed_adjust_timeout']
-                )
-
-            except Exception as e:
-                self._debug_log(f"Error adjusting print speed: {str(e)}")
-
-    def _check_and_apply_speed_adjustment(self) -> None:
-        """Apply speed adjustment with state locking"""
-        with self._state_lock:
-            current_time = time.time()
-            if (current_time - self._state['last_speed_adjust_time'] >= self._state['speed_adjust_timeout'] and
-                    self._state['pending_speed_adjust']):
-
-                try:
-                    command = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={self._state['speed_adjust_accumulator']}"
-                    self.gcode.run_script_from_command(command)
-                    self._debug_log(
-                        f"Applied speed adjustment: {self._state['speed_adjust_accumulator'] * 100:.1f}%"
-                    )
-                except Exception as e:
-                    self._debug_log(f"Error applying speed adjustment: {str(e)}")
-
-                self._state['pending_speed_adjust'] = False
-
-    def _monitor_input(self, device_path: str) -> None:
-        """
-        Monitor input device with optimized event handling and resource management.
-        Implements batched event processing and proper error recovery.
-        """
-        device = self.devices.get(device_path)
-        if not device:
-            self._debug_log(f"No device found for path: {device_path}")
-            return
-
-        # Track consecutive error count for backoff
-        error_count = 0
-        max_error_count = 5
-        base_retry_delay = DEFAULT_RETRY_DELAY
-
+    def handle_connect(self) -> None:
+        """Initialize keyboard hooks"""
         try:
-            # Attempt to grab device exclusively
-            try:
-                device.grab()
-                self._debug_log(f"Successfully grabbed device: {device_path}")
-            except Exception as e:
-                self._debug_log(f"Warning: Could not grab device exclusively: {str(e)}")
+            # Set up keyboard hooks for all mapped keys
+            for kb_key in self.key_mapping.keys():
+                keyboard.on_press_key(kb_key, self._on_key_event, suppress=True)
 
-            # Main event monitoring loop
-            while not self._thread_exit.is_set():
-                try:
-                    # Use select with timeout to check for events
-                    r, w, x = select.select([device.fileno()], [], [], DEFAULT_READ_TIMEOUT)
+            self._debug_log("Keyboard hooks initialized successfully")
+        except Exception as e:
+            self._debug_log(f"Error initializing keyboard hooks: {str(e)}")
 
-                    # No events available
-                    if not r:
-                        # Progressive sleep based on error count
-                        sleep_time = 0.1 * (1 + min(error_count, 3))
-                        time.sleep(sleep_time)
-                        continue
+    def _on_key_event(self, event) -> None:
+        """Handle keyboard events with debouncing"""
+        try:
+            current_time = time.time()
+            with self._state_lock:
+                # Check debounce
+                if (current_time - self._state['last_event_time'] < DEFAULT_DEBOUNCE_TIME and
+                        event.name == self._state['last_event_key']):
+                    return
 
-                    # Batch read all available events
-                    pending_events = []
-                    try:
-                        # Read available events with a timeout
-                        pending_events = list(device.read())
-                    except (IOError, OSError) as e:
-                        if e.errno == 11:  # Resource temporarily unavailable
-                            time.sleep(0.1)
-                            continue
-                        raise  # Re-raise other IOErrors
+                self._state['last_event_time'] = current_time
+                self._state['last_event_key'] = event.name
 
-                    if not pending_events:
-                        continue
+            # Map key to command
+            key = self.key_mapping.get(event.name)
+            if not key:
+                return
 
-                    # Process only key press events (value == 1)
-                    key_events = [
-                        evt for evt in pending_events
-                        if evt.type == evdev.ecodes.EV_KEY and evt.value == 1
-                    ]
-
-                    # Batch process key events
-                    for event in key_events:
-                        # Skip if we're shutting down
-                        if self._thread_exit.is_set():
-                            break
-
-                        # Apply global event filtering
-                        if not self._should_process_event(event.code, device.name):
-                            continue
-
-                        # Map key code to action
-                        key_value = self.key_mapping.get(event.code)
-                        if key_value is None:
-                            key_value = self.key_mapping.get(event.code)
-
-                        if key_value is not None:
-                            # Schedule key processing on main thread
-                            self.reactor.register_callback(
-                                lambda e, k=key_value: self._handle_key_press(k, device.name))
-
-                            if self.debug_log:
-                                self._debug_log(
-                                    f"Scheduled key press processing: {key_value} "
-                                    f"from {device_path}")
-
-                    # Reset error count after successful processing
-                    if error_count > 0:
-                        error_count = 0
-
-                except (OSError, IOError) as e:
-                    if self._thread_exit.is_set():
-                        break
-
-                    error_count += 1
-                    retry_delay = base_retry_delay * min(error_count, max_error_count)
-
-                    self._debug_log(
-                        f"Device read error on {device_path}: {str(e)}, "
-                        f"attempt {error_count}, waiting {retry_delay:.1f}s"
-                    )
-
-                    # Try to recover the device
-                    try:
-                        time.sleep(retry_delay)
-                        if error_count >= max_error_count:
-                            # Attempt device recovery
-                            device = InputDevice(device_path)
-                            self.devices[device_path] = device
-                            try:
-                                device.grab()
-                            except Exception:
-                                pass  # Continue even if grab fails
-                            error_count = 0
-                            self._debug_log(f"Successfully recovered device: {device_path}")
-                    except Exception as recovery_error:
-                        self._debug_log(f"Device recovery failed: {str(recovery_error)}")
-                        continue
-
-                except Exception as e:
-                    if self._thread_exit.is_set():
-                        break
-
-                    error_count += 1
-                    retry_delay = base_retry_delay * min(error_count, max_error_count)
-
-                    self._debug_log(
-                        f"Unexpected error in input monitoring for {device_path}: {str(e)}, "
-                        f"attempt {error_count}, waiting {retry_delay:.1f}s"
-                    )
-
-                    time.sleep(retry_delay)
+            # Schedule processing on main thread
+            self.reactor.register_callback(
+                lambda e, k=key: self._handle_key_press(k))
 
         except Exception as e:
-            self._debug_log(f"Fatal error in monitor thread for {device_path}: {str(e)}")
+            self._debug_log(f"Error in key event handler: {str(e)}")
 
-        finally:
-            # Cleanup
-            try:
-                device.ungrab()
-            except Exception:
-                pass  # Ignore ungrab errors
-
-            try:
-                device.close()
-            except Exception:
-                pass  # Ignore close errors
-
-            self._debug_log(f"Input monitoring stopped for device: {device_path}")
-
-    def _handle_key_press(self, key: str, device_name: str) -> None:
+    def _handle_key_press(self, key: str) -> None:
+        """Process key press with proper state handling"""
         try:
-            # Single print state check
             is_printing = self._check_printing_state()
 
-            # Early return conditions for printing state
-            if is_printing:
-                if key not in self.print_allowed_keys:
-                    return
-                if key in self.command_mapping and self.command_mapping[key].startswith('_'):
-                    return
+            # Handle printing restrictions
+            if is_printing and key not in self.print_allowed_keys:
+                return
 
-            # Handle special keys (up/down) with state-aware logic
-            if key in ['key_up', 'key_down']:
+            # Handle special keys
+            if key in self.no_confirm_keys:
                 self._handle_special_key(key, is_printing)
                 return
 
             # Handle regular keys
-            self._handle_regular_key(key, is_printing, device_name)
-
-        except Exception as e:
-            self._debug_log(f"Error in key press handler: {str(e)}")
-
-    def _handle_regular_key(self, key: str, is_printing: bool, device_name: str) -> None:
-        """Handle regular keys (non up/down keys) with preserved functionality"""
-        try:
-            # Check if this key needs confirmation
-            if key in self.no_confirm_keys:
-                command = self.command_mapping.get(key)
-                if command:
-                    self._debug_log(f"Executing command without confirmation: {command}")
-                    self.gcode.run_script_from_command(command)
-                return
-
-            # Handle enter key and command execution
-            if key in ["key_enter", "key_enter_alt"]:
+            if key == 'key_enter':
                 if self.pending_key:
                     command = self.command_mapping.get(self.pending_key)
                     if command:
-                        self._debug_log(f"Executing command: {command}")
+                        self._debug_log(f"Executing: {command}")
                         self.gcode.run_script_from_command(command)
                     self.pending_key = None
             else:
                 self.pending_key = key
                 command = self.command_mapping.get(key)
                 if command and command.startswith('_'):
-                    query_command = f"_QUERY{command}"
-                    self._debug_log(f"Executing query command: {query_command}")
-                    try:
-                        self.gcode.run_script_from_command(query_command)
-                    except Exception as query_error:
-                        self._debug_log(f"Query command failed: {str(query_error)}")
+                    self.gcode.run_script_from_command(f"_QUERY{command}")
 
-            # Notify Moonraker of the keypress
-            self.printer.send_event("numpad:keypress", json.dumps({
-                'key': key,
-                'pending_key': self.pending_key,
-                'device': device_name
-            }))
+            # Notify Moonraker
+            self._send_status_update(key)
 
         except Exception as e:
-            self._debug_log(f"Error handling regular key: {str(e)}")
+            self._debug_log(f"Error handling key press: {str(e)}")
 
     def _handle_special_key(self, key: str, is_printing: bool) -> None:
-        """Handle up/down keys with proper state management"""
+        """Handle up/down keys with state awareness"""
         try:
-            # Check probe status first
+            # Check probe calibration mode
             probe_active = False
             try:
                 probe_active = self.printer.lookup_object('gcode_macro CHECK_PROBE_STATUS').monitor_active
-            except Exception as e:
-                self._debug_log(f"Error checking probe status: {str(e)}")
+            except Exception:
+                pass
 
             if probe_active:
-                # Handle probe calibration mode
-                toolhead = self.printer.lookup_object('toolhead')
-                current_z = toolhead.get_position()[2]
-
-                if current_z < 0.1:
-                    # Fine adjustment
-                    command = f"TESTZ Z={'+' if key == 'key_up' else '-'}"
-                else:
-                    # Coarse adjustment
-                    step_size = max(current_z / 2, 0.01)
-                    command = f"TESTZ Z={'+' if key == 'key_up' else '-'}{step_size}"
-
-                self._debug_log(f"Executing probe calibration command: {command}")
-                self.gcode.run_script_from_command(command)
-                return
-
-            if is_printing:
-                current_z = self._check_z_position()
+                self._handle_probe_adjustment(key)
+            elif is_printing:
+                current_z = self._get_current_z()
                 if current_z < 1.0:
                     self._handle_first_layer_adjustment(key)
                 else:
                     self._handle_speed_adjustment('up' if key == 'key_up' else 'down')
-                return
-
-            # Not printing or probing - execute normal command
-            command = self.command_mapping.get(key)
-            if command:
-                self._debug_log(f"Executing command: {command}")
-                self.gcode.run_script_from_command(command)
+            else:
+                command = self.command_mapping.get(key)
+                if command:
+                    self.gcode.run_script_from_command(command)
 
         except Exception as e:
             self._debug_log(f"Error handling special key: {str(e)}")
 
-    def handle_disconnect(self) -> None:  # Changed from handle_shutdown
-        """Clean up resources during disconnect"""
+    def handle_disconnect(self) -> None:
+        """Clean up resources"""
         self._is_shutdown = True
-        self._thread_exit.set()
-
-        for device_path, device in self.devices.items():
-            try:
-                device.close()
-            except Exception as e:
-                self._debug_log(f"Error closing device {device_path}: {str(e)}")
-
-        for thread in self.input_threads.values():
-            if thread.is_alive():
-                thread.join(timeout=1.0)
+        keyboard.unhook_all()
+        self._debug_log("Keyboard hooks removed")
 
     def _debug_log(self, message: str) -> None:
-        """Log debug messages if debug is enabled"""
+        """Log debug messages if enabled"""
         if self.debug_log:
-            logging.info(f"NumpadMacrosClient Debug: {message}")
-            self.gcode.respond_info(f"NumpadMacrosClient Debug: {message}")
+            logging.info(f"NumpadMacros: {message}")
+            self.gcode.respond_info(f"NumpadMacros: {message}")
 
-    @staticmethod
-    def _initialize_key_mapping() -> Dict[int, str]:
-        """Initialize the key code to key name mapping"""
-        mapping = {
-            # Numpad specific keys
-            79: "key_1",  # KEY_KP1
-            80: "key_2",  # KEY_KP2
-            81: "key_3",  # KEY_KP3
-            75: "key_4",  # KEY_KP4
-            76: "key_5",  # KEY_KP5
-            77: "key_6",  # KEY_KP6
-            71: "key_7",  # KEY_KP7
-            72: "key_8",  # KEY_KP8
-            73: "key_9",  # KEY_KP9
-            82: "key_0",  # KEY_KP0
-            83: "key_dot",  # KEY_KPDOT
-            96: "key_enter",  # KEY_KPENTER
-            114: "key_down",  # KEY_VOLUMEDOWN
-            115: "key_up",  # KEY_VOLUMEUP
-
-            # Regular number keys (for alt mode)
-            2: "key_1_alt",  # KEY_1
-            3: "key_2_alt",  # KEY_2
-            4: "key_3_alt",  # KEY_3
-            5: "key_4_alt",  # KEY_4
-            6: "key_5_alt",  # KEY_5
-            7: "key_6_alt",  # KEY_6
-            8: "key_7_alt",  # KEY_7
-            9: "key_8_alt",  # KEY_8
-            10: "key_9_alt",  # KEY_9
-            11: "key_0_alt",  # KEY_0
-            28: "key_enter_alt",  # KEY_ENTER
-            41: "key_dot_alt",  # KEY_GRAVE
-        }
-        return mapping
-
-    def _should_process_event(self, event_code: int, device_name: str) -> bool:
-        """Determine if an event should be processed based on global event history"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_global_event_time
-
-        # If this is the same event code within debounce period, skip it
-        if (time_since_last < self.global_debounce_time and
-                event_code == self.last_global_event_code):
-            self._debug_log(f"Debouncing duplicate event from {device_name} "
-                            f"(code: {event_code}, time since last: {time_since_last:.3f}s)")
+    def _check_printing_state(self) -> bool:
+        """Check if printer is currently printing"""
+        try:
+            return self.printer.lookup_object('virtual_sdcard').is_active()
+        except Exception:
             return False
 
-        # Update global tracking
-        self.last_global_event_time = current_time
-        self.last_global_event_code = event_code
-        return True
-
-    def handle_connect(self) -> None:
-        """Initialize all configured devices with retry mechanism"""
-        for device_path in self.device_paths:
-            retry_count = 0
-            while retry_count < DEFAULT_RETRY_COUNT and not self._is_shutdown:
-                try:
-                    device = InputDevice(device_path)
-                    self.devices[device_path] = device
-                    self._debug_log(f"Connected to device: {device.name}")
-
-                    thread = threading.Thread(
-                        target=self._monitor_input,
-                        args=(device_path,)
-                    )
-                    thread.daemon = True
-                    thread.start()
-                    self.input_threads[device_path] = thread
-                    break
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count == DEFAULT_RETRY_COUNT:
-                        error_msg = f"Failed to initialize device {device_path} after {DEFAULT_RETRY_COUNT} attempts: {str(e)}"
-                        self._debug_log(error_msg)
-                    else:
-                        self._debug_log(f"Connection attempt {retry_count} failed for {device_path}, retrying...")
-                        time.sleep(DEFAULT_RETRY_DELAY)
-
-
-    def handle_shutdown(self) -> None:
-        """Clean up resources during shutdown"""
-        self._is_shutdown = True
-        self._thread_exit.set()
-
-        for device_path, device in self.devices.items():
-            try:
-                device.close()
-            except Exception as e:
-                self._debug_log(f"Error closing device {device_path}: {str(e)}")
-
-        for thread in self.input_threads.values():
-            if thread.is_alive():
-                thread.join(timeout=1.0)
-
-
-    def handle_moonraker_connected(self) -> None:
-        """Handle Moonraker connection event"""
-        self._debug_log("Moonraker connected")
-        self.send_status_to_moonraker()
-
-    # Update send_status_to_moonraker to use state lock:
-    def send_status_to_moonraker(self) -> None:
-        """Send status to Moonraker with state locking"""
+    def _get_current_z(self) -> float:
+        """Get current Z position safely"""
         try:
-            with self._state_lock:
-                status = {
-                    'command_mapping': self.command_mapping,
-                    'connected_devices': {
-                        path: device.name for path, device in self.devices.items()
-                    },
-                    'debug_enabled': self.debug_log,
-                    'pending_key': self.pending_key,
-                    'z_adjust_accumulator': self._state['z_adjust_accumulator'],
-                    'pending_z_adjust': self._state['pending_z_adjust']
-                }
-            self.printer.send_event("numpad:status_update", json.dumps(status))
-            self._debug_log(f"Status sent to Moonraker: {json.dumps(status)}")
-        except Exception as e:
-            self._debug_log(f"Error sending status to Moonraker: {str(e)}")
+            return self.printer.lookup_object('toolhead').get_position()[2]
+        except Exception:
+            return 0.0
 
+    def _send_status_update(self, key: str) -> None:
+        """Send status update to Moonraker"""
+        try:
+            status = {
+                'last_key': key,
+                'pending_key': self.pending_key,
+                'is_printing': self._check_printing_state(),
+                'z_adjust_accumulator': self._state['z_adjust_accumulator'],
+                'pending_z_adjust': self._state['pending_z_adjust']
+            }
+            self.printer.send_event("numpad:status_update", json.dumps(status))
+        except Exception as e:
+            self._debug_log(f"Error sending status update: {str(e)}")
 
     def cmd_NUMPAD_TEST(self, gcmd) -> None:
         """Handle NUMPAD_TEST command"""
-        self._debug_log("Running NUMPAD_TEST command")
-
         responses = [
-            "NumpadMacrosClient test command received",
+            "NumpadMacros test command",
             f"Debug logging: {'enabled' if self.debug_log else 'disabled'}",
             f"Pending key: {self.pending_key or 'None'}",
-            f"Z adjustment accumulator: {self._state['z_adjust_accumulator']:.3f}mm",
-            f"Pending Z adjustment: {'Yes' if self._state['pending_z_adjust'] else 'No'}"
+            "Current command mapping:",
+            json.dumps(self.command_mapping, indent=2)
         ]
-
-        if self.devices:
-            for path, device in self.devices.items():
-                responses.extend([
-                    f"Connected device: {device.name}",
-                    f"Path: {path}"
-                ])
-            responses.extend([
-                "Current command mapping:",
-                json.dumps(self.command_mapping, indent=2)
-            ])
-        else:
-            responses.append("No input devices connected")
-
         for response in responses:
             gcmd.respond_info(response)
-
-    # Update get_status to use state dictionary:
-    def get_status(self, eventtime: float = None) -> Dict[str, Any]:
-        """Return current status using state lock"""
-        with self._state_lock:
-            return {
-                'command_mapping': self.command_mapping,
-                'connected_devices': {
-                    path: device.name for path, device in self.devices.items()
-                },
-                'debug_enabled': self.debug_log,
-                'pending_key': self.pending_key,
-                'z_adjust_accumulator': self._state['z_adjust_accumulator'],
-                'pending_z_adjust': self._state['pending_z_adjust'],
-                'last_z_adjust_time': self._state['last_z_adjust_time'],
-                'speed_adjust_accumulator': self._state['speed_adjust_accumulator'],
-                'pending_speed_adjust': self._state['pending_speed_adjust'],
-                'last_speed_adjust_time': self._state['last_speed_adjust_time']
-            }
 
 
 def load_config(config):
