@@ -168,18 +168,22 @@ class NumpadMacros:
         if (current_time - self.last_z_adjust_time >= self.z_adjust_timeout and
                 self.pending_z_adjust):
 
-            # Update total offset
-            self.z_total_offset += self.z_adjust_accumulator
+            # Get the accumulated adjustment (will be positive for UP, negative for DOWN)
+            adjustment = self.z_adjust_accumulator
 
-            # Add debug logging
+            # Debug logging
             self._debug_log(
                 f"Applying Z adjustment - "
-                f"accumulator: {self.z_adjust_accumulator:.3f}mm, "
-                f"total offset: {self.z_total_offset:.3f}mm"
+                f"adjustment: {adjustment:.3f}mm"
             )
 
-            # Format command with TOTAL offset
-            command = f"SET_GCODE_OFFSET Z={self.z_total_offset:.3f} MOVE=1"
+            # For UP (positive adjustment), apply directly
+            # For DOWN (negative adjustment), apply as positive value with negative sign
+            if adjustment > 0:
+                command = f"SET_GCODE_OFFSET Z={adjustment:.3f} MOVE=1"
+            else:
+                # Convert negative adjustment to positive value and use negative sign
+                command = f"SET_GCODE_OFFSET Z=-{abs(adjustment):.3f} MOVE=1"
 
             try:
                 self.gcode.run_script_from_command(command)
@@ -325,7 +329,7 @@ class NumpadMacros:
                         current_z = toolhead.get_position()[2]
 
                         if current_z < 1.0:  # First layer - handle Z adjustment
-                            # Calculate potential new adjustment
+                            # Calculate adjustment based on direction
                             adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
                             potential_adjustment = self.z_adjust_accumulator + adjustment
 
@@ -379,6 +383,7 @@ class NumpadMacros:
                     self.gcode.run_script_from_command(command)
                 return
 
+            # Handle enter key and command execution
             if key in ["key_enter", "key_enter_alt"]:
                 if self.pending_key:
                     command = self.command_mapping.get(self.pending_key)
