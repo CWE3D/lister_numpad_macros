@@ -7,10 +7,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Define paths
-SCRIPT_DIR="/home/pi/lister_numpad_macros"
-KLIPPER_DIR="/home/pi/klipper"
+REPO_DIR="/home/pi/lister_numpad_macros"
 MOONRAKER_DIR="/home/pi/moonraker"
-KLIPPY_ENV="/home/pi/klippy-env"
 LOG_DIR="/home/pi/printer_data/logs"
 INSTALL_LOG="$LOG_DIR/numpad_macros_install.log"
 MOONRAKER_CONF="/home/pi/printer_data/config/moonraker.conf"
@@ -18,13 +16,13 @@ MOONRAKER_CONF="/home/pi/printer_data/config/moonraker.conf"
 # Update manager configuration block
 read -r -d '' UPDATE_MANAGER_CONFIG << 'EOL'
 
-[update_manager numpad_macros_service]
+[update_manager lister_numpad_macros]
 type: git_repo
-path: ~/numpad_macros_service
-origin: https://github.com/CWE3D/numpad_macros_service.git
+path: ~/lister_numpad_macros
+origin: https://github.com/CWE3D/lister_numpad_macros.git
 is_system_service: False
 primary_branch: main
-managed_services: klipper moonraker
+managed_services: moonraker
 install_script: install.sh
 EOL
 
@@ -41,73 +39,25 @@ log_warning() {
     echo -e "${YELLOW}$(date): $1${NC}" | tee -a "$INSTALL_LOG"
 }
 
-# Function to backup moonraker.conf
-backup_moonraker_conf() {
-    local backup_file="${MOONRAKER_CONF}.$(date +%Y%m%d_%H%M%S).backup"
-    if cp "$MOONRAKER_CONF" "$backup_file"; then
-        log_message "Created backup of moonraker.conf at $backup_file"
-        return 0
-    else
-        log_error "Failed to create backup of moonraker.conf"
-        return 1
-    fi
-}
-
-# Function to check if update_manager section exists
-section_exists() {
-    if grep -q "^\[update_manager lister_numpad_macros\]" "$MOONRAKER_CONF"; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-# Function to update moonraker.conf
-update_moonraker_conf() {
-    log_message "Checking moonraker.conf configuration..."
-
-    # Check if moonraker.conf exists
-    if [ ! -f "$MOONRAKER_CONF" ]; then
-        log_error "moonraker.conf not found at $MOONRAKER_CONF"
-        return 1
-    fi
-
-    # Create backup before making changes
-    backup_moonraker_conf || return 1
-
-    # Check and add update_manager section if needed
-    if ! section_exists; then
-        log_message "Adding [update_manager lister_numpad_macros] configuration..."
-        echo "$UPDATE_MANAGER_CONFIG" >> "$MOONRAKER_CONF"
-        log_message "moonraker.conf updated successfully"
-    else
-        log_warning "[update_manager lister_numpad_macros] section already exists in moonraker.conf"
+# Check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        log_error "Please run as root (sudo)"
+        exit 1
     fi
 }
 
 # Check if required directories exist
 check_directories() {
     local missing_dirs=0
+    local dirs=("$REPO_DIR" "$MOONRAKER_DIR")
 
-    if [ ! -d "$SCRIPT_DIR" ]; then
-        log_error "Error: Directory $SCRIPT_DIR does not exist"
-        missing_dirs=1
-    fi
-
-    if [ ! -d "$KLIPPER_DIR" ]; then
-        log_error "Error: Klipper directory $KLIPPER_DIR does not exist"
-        missing_dirs=1
-    fi
-
-    if [ ! -d "$MOONRAKER_DIR" ]; then
-        log_error "Error: Moonraker directory $MOONRAKER_DIR does not exist"
-        missing_dirs=1
-    fi
-
-    if [ ! -d "$KLIPPY_ENV" ]; then
-        log_error "Error: Klippy virtual environment $KLIPPY_ENV does not exist"
-        missing_dirs=1
-    fi
+    for dir in "${dirs[@]}"; do
+        if [ ! -d "$dir" ]; then
+            log_error "Error: Directory $dir does not exist"
+            missing_dirs=1
+        fi
+    done
 
     if [ $missing_dirs -eq 1 ]; then
         exit 1
@@ -117,131 +67,111 @@ check_directories() {
 # Install system dependencies
 install_system_deps() {
     log_message "Installing system dependencies..."
-    sudo apt-get update
-    if ! sudo apt-get install -y python3-evdev; then
-        log_error "Error: Failed to install system dependencies"
-        exit 1
-    fi
+    apt-get update
+    apt-get install -y python3-pip
 }
 
-# Add user to input group
+# Setup user permissions
 setup_user_permissions() {
-    log_message "Adding user to input group..."
-    if ! sudo usermod -a -G input $USER; then
-        log_error "Error: Failed to add user to input group"
-        exit 1
-    fi
+    log_message "Adding user pi to input group..."
+    usermod -a -G input pi
+
+    # Set correct ownership for repository
+    chown -R pi:pi "$REPO_DIR"
 }
 
 # Install Python dependencies
 install_python_deps() {
-    log_message "Installing Python dependencies in klippy-env..."
-    source $KLIPPY_ENV/bin/activate
-    if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-        if ! pip install -r "$SCRIPT_DIR/requirements.txt"; then
-            log_error "Error: Failed to install Python dependencies"
-            deactivate
-            exit 1
-        fi
-    else
-        log_warning "Warning: requirements.txt not found, installing evdev directly"
-        if ! pip install evdev; then
-            log_error "Error: Failed to install evdev"
-            deactivate
-            exit 1
-        fi
-    fi
-    deactivate
+    log_message "Installing Python dependencies..."
+    pip3 install -r "$REPO_DIR/requirements.txt"
 }
 
-# Setup Klipper plugin symlink
-setup_klipper_plugin() {
-    log_message "Setting up Klipper plugin symlink..."
-    EXTRAS_DIR="$SCRIPT_DIR/extras"
-    KLIPPER_EXTRAS_DIR="$KLIPPER_DIR/klippy/extras"
+# Setup event service
+setup_event_service() {
+    log_message "Setting up numpad event service..."
 
-    if [ ! -d "$KLIPPER_EXTRAS_DIR" ]; then
-        log_error "Error: Klipper extras directory does not exist"
-        exit 1
-    fi
+    # Create the systemd service file
+    cat > /etc/systemd/system/numpad_event_service.service << EOL
+[Unit]
+Description=Numpad Listener Service for Moonraker
+After=network.target moonraker.service
+Wants=moonraker.service
 
-    if [ -f "$EXTRAS_DIR/numpad_macros.py" ]; then
-        # Remove existing symlink if it exists
-        if [ -L "$KLIPPER_EXTRAS_DIR/numpad_macros.py" ]; then
-            rm "$KLIPPER_EXTRAS_DIR/numpad_macros.py"
-        fi
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 ${REPO_DIR}/extras/numpad_event_service.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
 
-        # Create new symlink
-        if ! ln -s "$EXTRAS_DIR/numpad_macros.py" "$KLIPPER_EXTRAS_DIR/numpad_macros.py"; then
-            log_error "Error: Failed to create Klipper plugin symlink"
-            exit 1
-        fi
-    else
-        log_error "Error: Klipper plugin file not found in $EXTRAS_DIR"
-        exit 1
-    fi
+[Install]
+WantedBy=multi-user.target
+EOL
+
+    # Make service file executable
+    chmod +x "${REPO_DIR}/extras/numpad_event_service.py"
+
+    # Reload systemd and enable service
+    systemctl daemon-reload
+    systemctl enable numpad_event_service.service
 }
 
 # Setup Moonraker component symlink
 setup_moonraker_component() {
     log_message "Setting up Moonraker component symlink..."
-    COMPONENTS_DIR="$SCRIPT_DIR/components"
-    MOONRAKER_COMPONENTS_DIR="$MOONRAKER_DIR/moonraker/components"
 
-    if [ ! -d "$MOONRAKER_COMPONENTS_DIR" ]; then
-        log_error "Error: Moonraker components directory does not exist"
-        exit 1
+    local moonraker_comp_dir="${MOONRAKER_DIR}/moonraker/components"
+    if [ -L "${moonraker_comp_dir}/numpad_macros.py" ]; then
+        rm "${moonraker_comp_dir}/numpad_macros.py"
     fi
+    ln -s "${REPO_DIR}/components/numpad_macros.py" "${moonraker_comp_dir}/numpad_macros.py"
+    chown -h pi:pi "${moonraker_comp_dir}/numpad_macros.py"
+}
 
-    if [ -f "$COMPONENTS_DIR/numpad_macros_service.py" ]; then  # Updated filename
-        # Remove existing symlink if it exists
-        if [ -L "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py" ]; then  # Updated filename
-            rm "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py"
-        fi
+# Update moonraker.conf
+update_moonraker_conf() {
+    log_message "Updating moonraker.conf..."
 
-        # Create new symlink
-        if ! ln -s "$COMPONENTS_DIR/numpad_macros_service.py" "$MOONRAKER_COMPONENTS_DIR/numpad_macros_service.py"; then  # Updated filename
-            log_error "Error: Failed to create Moonraker component symlink"
-            exit 1
-        fi
-    else
-        log_error "Error: Moonraker component file not found in $COMPONENTS_DIR"
-        exit 1
+    # Backup existing config
+    cp "$MOONRAKER_CONF" "${MOONRAKER_CONF}.backup"
+
+    # Add update_manager section if it doesn't exist
+    if ! grep -q "^\[update_manager lister_numpad_macros\]" "$MOONRAKER_CONF"; then
+        echo "$UPDATE_MANAGER_CONFIG" >> "$MOONRAKER_CONF"
     fi
 }
 
 # Restart services
 restart_services() {
-    log_message "Restarting Klipper and Moonraker services..."
-    sudo systemctl restart klipper
-    sudo systemctl restart moonraker
+    log_message "Restarting services..."
+    systemctl restart numpad_event_service
+    systemctl restart moonraker
 }
 
 # Main installation process
 main() {
     log_message "Starting Numpad Macros installation..."
 
+    check_root
     check_directories
     install_system_deps
     setup_user_permissions
     install_python_deps
-    setup_klipper_plugin
+    setup_event_service
     setup_moonraker_component
     update_moonraker_conf
     restart_services
 
     log_message "Installation completed successfully!"
-    log_warning "Note: You may need to log out and back in for the input group changes to take effect"
-    log_warning "Remember to add [numpad_macros] configuration to your printer.cfg to enable and configure the plugin"
 
     # Print verification steps
-    echo -e "\n${GREEN}You can verify the installation by running:${NC}"
-    echo -e "  ${YELLOW}1. ls -l $KLIPPER_DIR/klippy/extras/numpad_macros.py${NC}"
-    echo -e "  ${YELLOW}2. ls -l $MOONRAKER_DIR/moonraker/components/numpad_macros.py${NC}"
-    echo -e "  ${YELLOW}3. grep input /etc/group${NC}"
-    echo -e "  ${YELLOW}4. systemctl status klipper${NC}"
-    echo -e "  ${YELLOW}5. systemctl status moonraker${NC}"
-    echo -e "  ${YELLOW}6. cat $MOONRAKER_CONF${NC} (to verify update_manager configuration)"
+    echo -e "\n${GREEN}Verify the installation:${NC}"
+    echo -e "1. Check event service status: ${YELLOW}systemctl status numpad_event_service${NC}"
+    echo -e "2. View event service logs: ${YELLOW}journalctl -u numpad_event_service -f${NC}"
+    echo -e "3. Check Moonraker logs: ${YELLOW}tail -f ${LOG_DIR}/moonraker.log${NC}"
+
+    log_warning "Note: You may need to log out and back in for the input group changes to take effect"
 }
 
 # Run the installation

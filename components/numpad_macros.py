@@ -1,4 +1,4 @@
-class NumpadMacrosService:
+class NumpadMacros:
     def __init__(self, config):
         self.server = config.get_server()
         self.config = config
@@ -136,4 +136,4 @@ class NumpadMacrosService:
         await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
 
 def load_component(config):
-    return NumpadMacrosService(config)
+    return NumpadMacros(config)
