@@ -67,7 +67,7 @@ class NumpadMacros:
         # Add tracking for last event across all devices
         self.last_global_event_time = 0
         self.last_global_event_code = None
-        self.global_debounce_time = 0.3  # 300ms global debounce
+        self.global_debounce_time = 0.2  # 300ms global debounce
 
         # Define key options
         self.key_options = [
