@@ -1,234 +1,134 @@
 import logging
-from typing import Dict, Any, Optional
 
-class NumpadMacrosService:  # Changed from NumpadMacros
-    """
-    Moonraker component for managing numpad macros configuration and status.
-    Provides web API endpoints for configuration management and status updates.
-    Supports multiple devices and additional input types like volume knobs.
-    """
-
-    def __init__(self, config) -> None:
+class NumpadMacros:
+    def __init__(self, config):
         self.server = config.get_server()
         self.printer = self.server.lookup_component('printer')
 
-        # Initialize state
-        self._status: Dict[str, Any] = {
-            'enabled': True,
-            'connected_devices': {},
-            'last_keypress': None,
-            'last_error': None,
-            'config_loaded': False
-        }
-        self.keymap_config: Dict[str, str] = {}
-
-        # Initialize configuration
-        self._init_keymap_config(config)
-
-        # Update endpoint paths to reflect service name
+        # Register endpoint to receive events from the listener service
         self.server.register_endpoint(
-            "/machine/numpad/keymap",  # Updated path
-            ['GET', 'POST'],
-            self._handle_keymap_request,
-            transport="http"
-        )
-        self.server.register_endpoint(
-            "/machine/numpad/status",  # Updated path
-            ['GET'],
-            self._handle_status_request,
-            transport="http"
-        )
-        self.server.register_endpoint(
-            "/machine/numpad/devices",  # Updated path
-            ['GET'],
-            self._handle_devices_request,
-            transport="http"
+            "/server/numpad_event", ['POST'],
+            self._handle_numpad_event
         )
 
-        # Register notification methods (keep numpad: prefix for compatibility)
-        self.server.register_notification("numpad:keypress")
-        self.server.register_notification("numpad:status_update")
-        self.server.register_notification("numpad:device_update")
+        # Configuration
+        self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)
+        self.speed_adjust_increment = config.getfloat('speed_adjust_increment', 0.05)
+        self.min_speed_factor = config.getfloat('min_speed_factor', 0.2)
+        self.max_speed_factor = config.getfloat('max_speed_factor', 2.0)
+        self.debug_log = config.getboolean('debug_log', False)
 
-        # Register event handlers
-        self.server.register_event_handler(
-            "server:klippy_ready",
-            self._handle_ready
-        )
+        # State tracking
+        self.is_printing = False
+        self.is_probing = False
+        self.current_z = 0
 
-        logging.info("Numpad Macros Service Component Initialized")
-
-    @staticmethod
-    def _get_default_keymap() -> Dict[str, str]:
-        """Return default key mapping configuration"""
-        return {
-            # Standard numpad keys
-            "1": "HOME",
-            "2": "PROBE_BED_MESH",
-            "3": "Z_TILT_ADJUST",
-            "4": "BED_PROBE_MANUAL_ADJUST",
-            "5": "TURN_ON_LIGHT",
-            "6": "TURN_OFF_LIGHT",
-            "7": "DISABLE_X_Y_STEPPERS",
-            "8": "DISABLE_EXTRUDER_STEPPER",
-            "9": "COLD_CHANGE_FILAMENT",
-            "0": "TOGGLE_FILAMENT_SENSOR",
-            "dot": "PROBE_NOZZLE_DISTANCE",
-            "enter": "RESUME",
-            # Volume knob controls
-            "up": "SET_GCODE_OFFSET Z_ADJUST=0.025 MOVE=1",
-            "down": "SET_GCODE_OFFSET Z_ADJUST=-0.025 MOVE=1"
+        # User-configurable key mapping
+        self.key_mapping = {
+            'key_1': config.get('key_1', '_HOME_ALL'),
+            'key_2': config.get('key_2', '_SAFE_PARK_OFF'),
+            'key_3': config.get('key_3', '_CANCEL_PRINT'),
+            'key_4': config.get('key_4', '_PRE_HEAT_BED'),
+            'key_5': config.get('key_5', '_PRE_HEAT_NOZZLE'),
+            'key_6': config.get('key_6', '_BED_PROBE_MANUAL_ADJUST'),
+            'key_7': config.get('key_7', '_DISABLE_X_Y_STEPPERS'),
+            'key_8': config.get('key_8', '_CALIBRATE_NOZZLE_OFFSET_PROBE'),
+            'key_9': config.get('key_9', '_REPEAT_LAST_PRINT'),
+            'key_0': config.get('key_0', '_TOGGLE_PAUSE_RESUME'),
+            'key_dot': config.get('key_dot', '_EMERGENCY_STOP'),
+            'key_up': config.get('key_up', '_KNOB_UP'),
+            'key_down': config.get('key_down', '_KNOB_DOWN'),
         }
 
-    def _init_keymap_config(self, config) -> None:
-        """Initialize keymap configuration with validation"""
-        try:
-            default_keymap = self._get_default_keymap()
+        # Special handling for up/down keys
+        self.special_keys = {'key_up', 'key_down'}
 
-            # Load and validate configuration
-            for key, default_cmd in default_keymap.items():
-                config_key = key
-                cmd = config.get(config_key, default_cmd)
+    def _log_debug(self, message):
+        if self.debug_log:
+            logging.debug(f"NumpadMacros: {message}")
 
-                if self._validate_command(cmd):
-                    self.keymap_config[key] = cmd
-                else:
-                    logging.warning(
-                        f"Invalid command format for {config_key}: {cmd}, "
-                        f"using default: {default_cmd}"
-                    )
-                    self.keymap_config[key] = default_cmd
+    async def _handle_numpad_event(self, web_request):
+        event = web_request.get_json_body()
+        key = f"key_{event.get('key')}"
+        self._log_debug(f"Received key event: {key}")
 
-            self._status['config_loaded'] = True
-            logging.info("Numpad keymap configuration loaded successfully")
+        if key in self.key_mapping:
+            if key in self.special_keys:
+                await self._handle_special_key(key)
+            else:
+                await self._execute_macro(self.key_mapping[key])
+        return {'status': "ok"}
 
-        except Exception as e:
-            logging.error(f"Error loading numpad configuration: {str(e)}")
-            self.keymap_config = self._get_default_keymap()
-            self._status['last_error'] = str(e)
+    async def _handle_special_key(self, key):
+        await self._update_printer_state()
+        if key == 'key_up':
+            await self._handle_up()
+        elif key == 'key_down':
+            await self._handle_down()
 
-    @staticmethod
-    def _validate_command(cmd: str) -> bool:
-        """Validate command format"""
-        if not isinstance(cmd, str) or not cmd.strip():
-            return False
+    async def _update_printer_state(self):
+        result = await self.printer.run_method("info")
+        self.is_printing = result['state'] == 'printing'
+        toolhead = self.printer.lookup_component('toolhead')
+        self.current_z = toolhead.get_position()[2]
+        self.is_probing = await self.printer.run_method("gcode.check_probe_status")
 
-        # Add additional command validation as needed
-        invalid_chars = set('<>{}[]\\')
-        return not any(char in cmd for char in invalid_chars)
+    async def _handle_up(self):
+        if self.is_probing:
+            await self._probe_up()
+        elif self.is_printing:
+            if self.current_z < 1.0:
+                await self._z_adjust_up()
+            else:
+                await self._speed_adjust_up()
+        else:
+            await self._execute_macro(self.key_mapping['key_up'])
 
-    async def _handle_ready(self) -> None:
-        """Handle Klippy ready event"""
-        try:
-            logging.info("Numpad Macros Component Ready")
-            await self._update_status(enabled=True)
-        except Exception as e:
-            logging.error(f"Error in ready handler: {str(e)}")
+    async def _handle_down(self):
+        if self.is_probing:
+            await self._probe_down()
+        elif self.is_printing:
+            if self.current_z < 1.0:
+                await self._z_adjust_down()
+            else:
+                await self._speed_adjust_down()
+        else:
+            await self._execute_macro(self.key_mapping['key_down'])
 
-    async def _handle_keymap_request(self, web_request) -> Dict[str, Any]:
-        """Handle keymap GET/POST requests with validation"""
-        if web_request.get_method() == 'GET':
-            return {'keymap': self.keymap_config}
+    async def _execute_macro(self, macro_name):
+        self._log_debug(f"Executing macro: {macro_name}")
+        await self.printer.run_method("gcode.script", script=macro_name)
 
-        try:
-            data = web_request.get_json_body()
-            if not isinstance(data, dict) or 'keymap' not in data:
-                raise self.server.error("Invalid request format")
+    async def _probe_up(self):
+        if self.current_z < 0.1:
+            await self._execute_macro("TESTZ Z=+")
+        else:
+            step_size = max(self.current_z / 2, 0.01)
+            await self._execute_macro(f"TESTZ Z=+{step_size}")
 
-            new_keymap = data['keymap']
-            if not isinstance(new_keymap, dict):
-                raise self.server.error("Invalid keymap format")
+    async def _probe_down(self):
+        if self.current_z < 0.1:
+            await self._execute_macro("TESTZ Z=-")
+        else:
+            step_size = max(self.current_z / 2, 0.01)
+            await self._execute_macro(f"TESTZ Z=-{step_size}")
 
-            # Validate and update keymap
-            validated_keymap = {}
-            for key, command in new_keymap.items():
-                if key in self.keymap_config:
-                    if self._validate_command(command):
-                        validated_keymap[key] = command
-                    else:
-                        raise self.server.error(
-                            f"Invalid command format for key: {key}")
+    async def _z_adjust_up(self):
+        await self._execute_macro(f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1")
 
-            # Update configuration
-            self.keymap_config.update(validated_keymap)
-            await self._save_keymap()
-            await self._notify_keymap_update()
+    async def _z_adjust_down(self):
+        await self._execute_macro(f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1")
 
-            return {'keymap': self.keymap_config}
+    async def _speed_adjust_up(self):
+        current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+        new_factor = min(current_factor + self.speed_adjust_increment, self.max_speed_factor)
+        await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
 
-        except Exception as e:
-            raise self.server.error(f"Failed to update keymap: {str(e)}")
-
-    async def _handle_status_request(self, web_request) -> Dict[str, Any]:
-        """Return current numpad status"""
-        return {
-            'status': self._status,
-            'keymap': self.keymap_config
-        }
-
-    async def _handle_devices_request(self, web_request) -> Dict[str, Any]:
-        """Return information about connected devices"""
-        return {
-            'devices': self._status['connected_devices']
-        }
-
-    async def _update_status(self, **kwargs) -> None:
-        """Update component status and notify clients"""
-        self._status.update(kwargs)
-        try:
-            await self.server.send_event(
-                "numpad:status_update",
-                {
-                    'status': self._status,
-                    'keymap': self.keymap_config
-                }
-            )
-        except Exception as e:
-            logging.error(f"Error sending status update: {str(e)}")
-
-    async def _notify_keymap_update(self) -> None:
-        """Notify clients about keymap changes"""
-        try:
-            await self.server.send_event(
-                "numpad:keymap_update",
-                {'keymap': self.keymap_config}
-            )
-        except Exception as e:
-            logging.error(f"Error notifying keymap update: {str(e)}")
-
-    async def _handle_device_update(self, device_info: Dict[str, Any]) -> None:
-        """Handle device connection/disconnection updates"""
-        try:
-            self._status['connected_devices'] = device_info
-            await self.server.send_event(
-                "numpad:device_update",
-                {'devices': device_info}
-            )
-        except Exception as e:
-            logging.error(f"Error handling device update: {str(e)}")
-
-    async def _save_keymap(self) -> None:
-        """Save current keymap configuration"""
-        try:
-            # TODO: Implement actual configuration saving mechanism
-            # Could save to a config file or database
-            self._status['config_loaded'] = True
-            logging.info("Keymap configuration saved successfully")
-        except Exception as e:
-            logging.error(f"Error saving keymap configuration: {str(e)}")
-            self._status['last_error'] = str(e)
-
-    async def close(self) -> None:
-        """Clean up resources on shutdown"""
-        logging.info("Closing Numpad Macros Component")
-        try:
-            await self._update_status(
-                enabled=False,
-                connected_devices={}
-            )
-        except Exception as e:
-            logging.error(f"Error during component shutdown: {str(e)}")
+    async def _speed_adjust_down(self):
+        current_factor = await self.printer.run_method("gcode_move.get_status", ["speed_factor"])
+        new_factor = max(current_factor - self.speed_adjust_increment, self.min_speed_factor)
+        await self._execute_macro(f"SET_VELOCITY_FACTOR FACTOR={new_factor}")
 
 
 def load_component(config):
-    return NumpadMacrosService(config)
+    return NumpadMacros(config)
