@@ -1,8 +1,10 @@
+from logging import getLogger
+
 class NumpadMacros:
     def __init__(self, config):
         self.server = config.get_server()
         self.config = config
-        self.logger = self.server.get_logger()
+        self.logger = getLogger(self.config.get_name())
         self.name = config.get_name()
 
         # Configuration
