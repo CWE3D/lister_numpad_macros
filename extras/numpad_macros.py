@@ -22,6 +22,13 @@ class NumpadMacros:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
         self.query_prefix = config.get('query_prefix', '_QUERY')
+        # Add configuration for keys allowed during printing
+        default_print_allowed = "key_dot,key_dot_alt,key_grave,key_enter,key_enter_alt"  # Default keys allowed during print
+        print_allowed_str = config.get('print_allowed_keys', default_print_allowed)
+        self.print_allowed_keys = [key.strip() for key in print_allowed_str.split(',') if key.strip()]
+
+        # Debug log the allowed keys
+        self._debug_log(f"Keys allowed during printing: {self.print_allowed_keys}")
 
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
@@ -323,19 +330,15 @@ class NumpadMacros:
             try:
                 printing = self.printer.lookup_object('virtual_sdcard').is_active()
                 if printing:
-                    # Only allow emergency stop keys during printing
-                    if key in ['key_dot', 'key_grave', 'key_dot_alt']:
-                        self._debug_log(f"Emergency stop key {key} pressed during printing - allowing")
                     # Special case for volume knob during first layer
-                    elif key in ['key_up', 'key_down']:
+                    if key in ['key_up', 'key_down']:
                         toolhead = self.printer.lookup_object('toolhead')
                         current_z = toolhead.get_position()[2]
                         if current_z < 1.0:  # First layer - handle Z adjustment
-                            # Existing Z adjustment logic
+                            # Existing Z adjustment logic for first layer
                             adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
                             potential_adjustment = self.z_adjust_accumulator + adjustment
 
-                            # Apply safety limits
                             if abs(potential_adjustment) > self.z_adjust_max_per_period:
                                 self._debug_log(
                                     f"Safety limit reached: attempted adjustment {potential_adjustment:.3f}mm "
@@ -346,7 +349,6 @@ class NumpadMacros:
                                     else -self.z_adjust_max_per_period
                                 )
 
-                            # Apply the safe adjustment
                             old_value = self.z_adjust_accumulator
                             self.z_adjust_accumulator = potential_adjustment
                             self.last_z_adjust_time = time.time()
@@ -358,15 +360,24 @@ class NumpadMacros:
                                 f"(added {adjustment:+.3f}mm, max per period: ±{self.z_adjust_max_per_period}mm)"
                             )
 
-                            # Schedule check for timeout
                             self.reactor.register_callback(
                                 lambda e: self._check_and_apply_z_adjustment(),
                                 self.reactor.monotonic() + self.z_adjust_timeout
                             )
                         else:  # Beyond first layer - handle speed adjustment
                             self._handle_speed_adjustment('up' if key == 'key_up' else 'down')
+                        return
+
+                    # Check if key is in allowed list
+                    elif key in self.print_allowed_keys:
+                        self._debug_log(f"Key {key} allowed during printing")
+                        # Skip _QUERY commands during printing
+                        command = self.command_mapping.get(key)
+                        if command and not command.startswith('_QUERY'):
+                            self._debug_log(f"Executing allowed command during print: {command}")
+                            self.gcode.run_script_from_command(command)
                     else:
-                        self._debug_log(f"Ignoring key {key} during printing")
+                        self._debug_log(f"Ignoring key {key} during printing (not in allowed list)")
                     return
             except Exception as e:
                 self._debug_log(f"Error checking print state: {str(e)}")
