@@ -316,20 +316,22 @@ class NumpadMacros:
 
     def _handle_key_press(self, key: str, device_name: str) -> None:
         try:
-            # Show key press in console
+            # Always show key press in console for debugging
             self.gcode.respond_info(f"NumpadMacros: Key '{key}' pressed on {device_name}")
 
-            # Special handling for knob inputs
-            if key in ['key_up', 'key_down']:
-                try:
-                    printing = self.printer.lookup_object('virtual_sdcard').is_active()
-                    if printing:
-                        # Get current Z position
+            # Check if printer is printing
+            try:
+                printing = self.printer.lookup_object('virtual_sdcard').is_active()
+                if printing:
+                    # Only allow emergency stop keys during printing
+                    if key in ['key_dot', 'key_grave', 'key_dot_alt']:
+                        self._debug_log(f"Emergency stop key {key} pressed during printing - allowing")
+                    # Special case for volume knob during first layer
+                    elif key in ['key_up', 'key_down']:
                         toolhead = self.printer.lookup_object('toolhead')
                         current_z = toolhead.get_position()[2]
-
                         if current_z < 1.0:  # First layer - handle Z adjustment
-                            # Calculate adjustment based on direction
+                            # Existing Z adjustment logic
                             adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
                             potential_adjustment = self.z_adjust_accumulator + adjustment
 
@@ -339,7 +341,6 @@ class NumpadMacros:
                                     f"Safety limit reached: attempted adjustment {potential_adjustment:.3f}mm "
                                     f"exceeds maximum {self.z_adjust_max_per_period}mm per period"
                                 )
-                                # Clamp to maximum allowed value while preserving direction
                                 potential_adjustment = (
                                     self.z_adjust_max_per_period if potential_adjustment > 0
                                     else -self.z_adjust_max_per_period
@@ -364,11 +365,15 @@ class NumpadMacros:
                             )
                         else:  # Beyond first layer - handle speed adjustment
                             self._handle_speed_adjustment('up' if key == 'key_up' else 'down')
-                        return
-                except Exception as e:
-                    self._debug_log(f"Error checking print state: {str(e)}")
+                    else:
+                        self._debug_log(f"Ignoring key {key} during printing")
+                    return
+            except Exception as e:
+                self._debug_log(f"Error checking print state: {str(e)}")
 
-                # Handle non-first-layer or non-printing state
+            # Rest of the existing key handling logic for non-printing state
+            # Special handling for knob inputs (existing logic)
+            if key in ['key_up', 'key_down']:
                 command = self.command_mapping.get(key)
                 if command:
                     self._debug_log(f"Executing command: {command}")
