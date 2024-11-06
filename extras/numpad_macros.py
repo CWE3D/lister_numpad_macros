@@ -40,6 +40,7 @@ class NumpadMacros:
 
         # Z adjustment accumulation settings
         self.z_adjust_accumulator = 0.0
+        self.z_total_offset = 0.0
         self.last_z_adjust_time = 0
         self.z_adjust_timeout = config.getfloat('z_adjust_timeout', 1.0)  # Make timeout configurable
         self.z_adjust_increment = config.getfloat('z_adjust_increment', 0.01)  # Make increment configurable
@@ -165,15 +166,20 @@ class NumpadMacros:
         """Apply accumulated Z adjustment after timeout"""
         current_time = time.time()
         if (current_time - self.last_z_adjust_time >= self.z_adjust_timeout and
-                self.pending_z_adjust):  # Removed the != 0 check
+                self.pending_z_adjust):
 
-            # Add debug logging to see the value right before applying
-            self._debug_log(f"About to apply Z adjustment, current accumulator: {self.z_adjust_accumulator:.3f}mm")
+            # Update total offset
+            self.z_total_offset += self.z_adjust_accumulator
 
-            # Format command with accumulated adjustment
-            command = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_accumulator:.3f} MOVE=1"
+            # Add debug logging
+            self._debug_log(
+                f"Applying Z adjustment - "
+                f"accumulator: {self.z_adjust_accumulator:.3f}mm, "
+                f"total offset: {self.z_total_offset:.3f}mm"
+            )
 
-            self._debug_log(f"Applying accumulated Z adjustment: {self.z_adjust_accumulator:.3f}mm")
+            # Format command with TOTAL offset
+            command = f"SET_GCODE_OFFSET Z={self.z_total_offset:.3f} MOVE=1"
 
             try:
                 self.gcode.run_script_from_command(command)
