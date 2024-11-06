@@ -27,13 +27,13 @@ class NumpadMacros:
         print_allowed_str = config.get('print_allowed_keys', default_print_allowed)
         self.print_allowed_keys = [key.strip() for key in print_allowed_str.split(',') if key.strip()]
 
-        # Debug log the allowed keys
-        self._debug_log(f"Keys allowed during printing: {self.print_allowed_keys}")
-
         # Register event handlers
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
         self.printer.register_event_handler("klippy:disconnect", self.handle_disconnect)  # Changed from shutdown
         self.printer.register_event_handler('moonraker:connected', self.handle_moonraker_connected)
+
+        # Debug log the allowed keys
+        self._debug_log(f"Keys allowed during printing: {self.print_allowed_keys}")
 
         # Get configuration values
         device_paths = config.get('device_paths', DEFAULT_DEVICE_PATH).split(',')
