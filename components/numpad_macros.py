@@ -94,8 +94,9 @@ class NumpadMacros:
             self.query_mapping[key] = f"_QUERY{self.command_mapping[key]}"
 
             if self.debug_log:
-                await self._execute_gcode(
-                    f'RESPOND MSG="Numpad macros: Loaded mapping for {key} -> Command: {self.command_mapping[key]}, Query: {self.query_mapping[key]}"'
+                self.logger.debug(
+                    f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
+                    f"Query: {self.query_mapping[key]}"
                 )
 
     async def _handle_command_key(self, key: str) -> None:
