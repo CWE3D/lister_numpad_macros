@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from .klippy_apis import KlippyAPI
     from .job_state import JobState
 
-
 class NumpadMacros:
     def __init__(self, config: ConfigHelper) -> None:
         self.server = config.get_server()
@@ -76,7 +75,10 @@ class NumpadMacros:
         key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
             'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
-            'key_dot', 'key_enter'
+            'key_dot', 'key_enter', 'key_up', 'key_down',
+            'key_1_alt', 'key_2_alt', 'key_3_alt', 'key_4_alt',
+            'key_5_alt', 'key_6_alt', 'key_7_alt', 'key_8_alt',
+            'key_9_alt', 'key_0_alt', 'key_dot_alt', 'key_enter_alt'
         ]
         for key in key_options:
             cmd = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
@@ -189,24 +191,23 @@ class NumpadMacros:
 
     async def _handle_command_key(self, key: str) -> None:
         """Handle regular command keys"""
-        cmd_key = f"key_{key}"
-        if cmd_key not in self.command_mapping:
+        if key not in self.command_mapping:
             if self.debug_log:
                 self.logger.debug(f"No command mapped for key: {key}")
             return
 
         # Store pending command
-        self.pending_key = cmd_key
+        self.pending_key = key
 
         # Execute query version if available
-        query_cmd = self.query_mapping.get(cmd_key)
+        query_cmd = self.query_mapping.get(key)
         if query_cmd:
             await self._execute_gcode(query_cmd)
 
         self._notify_status_update()
         self.server.send_event(
             "numpad_macros:command_queued",
-            {'command': self.command_mapping[cmd_key]}
+            {'command': self.command_mapping[key]}
         )
 
     async def _handle_enter_key(self) -> None:
