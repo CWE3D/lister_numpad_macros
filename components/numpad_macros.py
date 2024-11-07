@@ -281,8 +281,35 @@ class NumpadMacros:
                 await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
                 await kapis.run_gcode(cmd)
 
+            elif self._is_printing:
+                # Get Z height to determine mode
+                toolhead = await self._get_toolhead_position()
+                current_z = toolhead['z']
+
                 if self.debug_log:
-                    self.logger.debug(f"Executed probe adjustment command: {cmd}")
+                    self.logger.debug(f"Print adjustment - Current Z: {current_z}")
+
+                if current_z < 1.0:
+                    # Z offset adjustment
+                    if key == 'key_up':
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
+                    else:
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
+
+                    if self.debug_log:
+                        self.logger.debug(f"First layer Z adjustment: {cmd}")
+                else:
+                    # Simple speed adjustment
+                    cmd = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={value}"
+                    if self.debug_log:
+                        self.logger.debug(f"Speed adjustment: {cmd}")
+
+                # Execute the command
+                if self.debug_log:
+                    self.logger.debug(f"Executing adjustment command: {cmd}")
+
+                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
+                await kapis.run_gcode(cmd)
 
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
