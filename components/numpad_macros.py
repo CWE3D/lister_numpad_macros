@@ -91,7 +91,7 @@ class NumpadMacros:
             # Store the command exactly as configured
             self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
             # Create QUERY version by adding prefix
-            self.query_mapping[key] = f"QUERY_{self.command_mapping[key]}"
+            self.query_mapping[key] = f"_QUERY{self.command_mapping[key]}"
 
             if self.debug_log:
                 await self._execute_gcode(
