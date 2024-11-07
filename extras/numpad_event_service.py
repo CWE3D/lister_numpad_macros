@@ -33,8 +33,9 @@ def on_key_event(e):
     """Handle key events - only process key down events"""
     # Only process key down events
     if e.event_type == 'down':
+        """Prefix with key_"""
         event_data = {
-            "key": e.name,
+            "key": f"key_{e.name}",
             "scan_code": e.scan_code,
             "event_type": e.event_type,
             "time": e.time
