@@ -1,195 +1,168 @@
-# Numpad Macros Plugin for Klipper
+# CWE3D Lister Numpad Control System Analysis
 
-## Overview
-The Numpad Macros plugin enables you to use USB input devices (numpads, knobs, etc.) as control interfaces for your Klipper-powered 3D printer. This plugin provides customizable key mappings with a two-step confirmation process for safe operation.
+## System Architecture
 
-## Key Features
-- Two-step command execution (Key + ENTER confirmation)
-- Multiple device support
-- Configurable key mappings
+### 1. Core Components
+- **NumpadMacros Class**: Main plugin implementation 
+- **Moonraker Integration**: Web API and configuration management
+- **Klipper Macros**: GCode command execution and printer control
+
+### 2. Key Features
+- Two-step command confirmation system
 - Real-time status updates
-- Debug logging
-- Automatic device recovery
-- Web API integration
+- Dynamic Z-height and speed adjustments
+- Probe calibration support
+- Extensive error handling and state management
 
-## How It Works
+## Implementation Details
 
-### Two-Step Command Process
-1. Press the desired command key (1-9, 0, DOT)
-2. Press ENTER to confirm and execute the command
-   - The command won't execute until confirmed with ENTER
-   - Pressing a new command key before ENTER will change the pending command
+### Command Processing Flow
+1. **Input Reception**
+   - Numpad events received via `/server/numpad/event` endpoint
+   - Events include key code and event type (down/up)
 
-### Architecture
-The plugin consists of two main components:
+2. **Command Handling**
+   - Three types of keys:
+     - Confirmation keys (ENTER)
+     - Direct execution keys (up/down)
+     - Command keys (require confirmation)
+   - Each command key has associated query and execution commands
 
-1. **Klipper Plugin (numpad_macros.py)**
-   - Handles direct input device interaction
-   - Processes key events
-   - Manages two-step command confirmation
-   - Executes mapped commands
-   - Sends status updates to Moonraker
-
-2. **Moonraker Component (numpad_macros_service.py)**
-   - Provides web API endpoints
-   - Handles configuration management
-   - Enables real-time status updates
-   - Facilitates integration with front-end clients
-
-### Communication Flow
-```mermaid
-sequenceDiagram
-    participant User
-    participant Numpad
-    participant KlipperPlugin
-    participant Moonraker
-    
-    User->>Numpad: Press Command Key
-    Numpad->>KlipperPlugin: Key Event
-    KlipperPlugin->>KlipperPlugin: Store as Pending
-    KlipperPlugin->>Moonraker: Status Update
-    User->>Numpad: Press ENTER
-    Numpad->>KlipperPlugin: ENTER Key Event
-    KlipperPlugin->>KlipperPlugin: Execute Pending Command
-    KlipperPlugin->>Moonraker: Command Execution Status
+3. **State Management**
+```python
+class State:
+    pending_key: Optional[str]
+    pending_command: Optional[str]
+    is_probing: bool
+    is_printing: bool
 ```
 
-## Installation
+### Key Command Categories
 
-### Prerequisites
-- Klipper installed and configured
-- Moonraker installed and configured
-- USB input devices (numpad, volume knob, etc.)
-- Python 3.7 or higher
-- python3-evdev package
+1. **Direct Execution Commands**
+   - Up/Down keys for realtime adjustments
+   - No confirmation required
+   - Context-sensitive behavior:
+     - Z-offset adjustment during printing
+     - Speed adjustment during printing
+     - Probe height adjustment during probing
 
-### Automatic Installation
-1. Clone the repository:
-```bash
-cd ~
-git clone https://github.com/CWE3D/lister_numpad_macros.git
-```
+2. **Confirmed Commands**
+   - Require ENTER key confirmation
+   - Two-step process:
+     1. Query command execution (`_QUERY_` prefix)
+     2. Main command execution after confirmation
+   - Examples:
+     - Homing
+     - Emergency stop
+     - Print control
+     - Temperature control
 
-2. Run the installation script:
-```bash
-cd ~/lister_numpad_macros
-chmod +x install.sh
-./install.sh
-```
+### Configuration System
 
-## Configuration
-
-### Example Macro Configuration
-Add the following macro definitions to your `printer.cfg`:
-
-[Previous macro definitions remain the same...]
-
-### Numpad Configuration
-Then, add the numpad configuration section:
-
+1. **Key Mappings**
 ```ini
-[numpad_macros]
-# Multiple device support (comma-separated)
-device_paths: /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-kbd, /dev/input/by-id/usb-INSTANT_USB_Keyboard-event-if01
-
-# Enable debug logging for troubleshooting
-debug_log: True
-
-# Key mappings - Remember all commands require ENTER confirmation
-key_1: _HOME_ALL                    # Home all axes
-key_2: _SAFE_PARK_OFF              # Park and disable steppers
-key_3: _CANCEL_PRINT               # Cancel current print
-key_4: _PRE_HEAT_BED              # Pre-heat bed
-key_5: _PRE_HEAT_NOZZLE           # Pre-heat nozzle
-key_6: _BED_PROBE_MANUAL_ADJUST    # Manual bed adjustment
-key_7: _DISABLE_X_Y_STEPPERS       # Disable X/Y steppers
-key_8: _CALIBRATE_NOZZLE_OFFSET_PROBE # Calibrate nozzle offset
-key_9: _REPEAT_LAST_PRINT         # Repeat last print
-key_0: _TOGGLE_PAUSE_RESUME       # Toggle pause/resume
-key_dot: _EMERGENCY_STOP          # Emergency stop
+key_1: _HOME_ALL
+key_2: _SAFE_PARK_OFF
+key_3: _CANCEL_PRINT
+# etc...
 ```
 
-### Key Operation
-1. Press the desired key (1-9, 0, or DOT)
-2. The command will be stored as pending
-3. Press ENTER to execute the command
-4. If you press a different key before ENTER, the new command becomes pending instead
-
-### Supported Keys
-| Physical Key | Config Name | Required Confirmation | Default Action |
-|-------------|-------------|----------------------|----------------|
-| 1 or KP1    | key_1      | ENTER               | _HOME_ALL |
-| 2 or KP2    | key_2      | ENTER               | _SAFE_PARK_OFF |
-| 3 or KP3    | key_3      | ENTER               | _CANCEL_PRINT |
-| 4 or KP4    | key_4      | ENTER               | _PRE_HEAT_BED |
-| 5 or KP5    | key_5      | ENTER               | _PRE_HEAT_NOZZLE |
-| 6 or KP6    | key_6      | ENTER               | _BED_PROBE_MANUAL_ADJUST |
-| 7 or KP7    | key_7      | ENTER               | _DISABLE_X_Y_STEPPERS |
-| 8 or KP8    | key_8      | ENTER               | _CALIBRATE_NOZZLE_OFFSET_PROBE |
-| 9 or KP9    | key_9      | ENTER               | _REPEAT_LAST_PRINT |
-| 0 or KP0    | key_0      | ENTER               | _TOGGLE_PAUSE_RESUME |
-| . or KP_DOT | key_dot    | ENTER               | _EMERGENCY_STOP |
-| Enter       | key_enter  | N/A                 | Command Confirmation |
-
-[Rest of the documentation remains the same...]
-
-## Finding Your Device Paths
-
-1. List available input devices:
-```bash
-ls -l /dev/input/by-id/
-```
-
-2. Get detailed device information:
-```bash
-evtest
-```
-
-## API Endpoints
-
-Moonraker exposes the following HTTP endpoints:
-
-- `GET /machine/numpad/status` - Get current status
-- `GET /machine/numpad/keymap` - Get current keymap
-- `POST /machine/numpad/keymap` - Update keymap
-- `GET /machine/numpad/devices` - List connected devices
-
-## Debugging
-
-### Enable Debug Logging
+2. **Adjustment Parameters**
 ```ini
-[numpad_macros]
-debug_log: True
+z_adjust_increment: 0.01
+speed_adjust_increment: 0.05
+probe_min_step: 0.01
+probe_coarse_multiplier: 0.5
 ```
 
-### Test Command
-```bash
-NUMPAD_TEST
+### Safety Features
+
+1. **Two-Step Confirmation**
+   - Critical commands require explicit confirmation
+   - Previous pending commands are cleared on new command
+   - Clear feedback through status messages
+
+2. **State Validation**
+   - Continuous monitoring of printer state
+   - Context-aware command execution
+   - Automatic state reset on errors
+
+3. **Error Handling**
+   - Comprehensive exception catching
+   - Status notifications to clients
+   - Automatic state recovery
+
+## Communication Interfaces
+
+### 1. Web API Endpoints
+- `/server/numpad/event`: Command input
+- `/server/numpad/status`: State queries
+- Event notifications for status updates
+
+### 2. Moonraker Events
+```python
+server.register_notification('numpad_macros:status_update')
+server.register_notification('numpad_macros:command_queued')
+server.register_notification('numpad_macros:command_executed')
 ```
 
-This will show:
-- Connected devices
-- Current key mappings
-- Debug status
-- Current pending key (if any)
+### 3. Klipper Integration
+- Direct GCode command execution
+- Printer state monitoring
+- Macro execution
 
-### Common Issues
+## Intelligent Features
 
-1. **Device Not Found**
-   - Check USB connections
-   - Verify device paths
-   - Check user permissions (input group)
+### 1. Adaptive Probe Adjustment
+- Fine-grained control near bed (< 0.1mm)
+- Coarse adjustments at higher positions
+- Dynamic step size calculation
 
-2. **Keys Not Responding**
-   - Enable debug logging
-   - Check Klipper logs
-   - Verify device detection
-   - Check if key is properly mapped in config
+### 2. Context-Aware Controls
+- Z-offset adjustments during first layer
+- Speed adjustments during printing
+- Probe-specific controls during calibration
 
-3. **Permission Issues**
-   - Verify input group membership: `groups | grep input`
-   - Log out and back in after installation
-   - Check device permissions: `ls -l /dev/input/by-id/`
+### 3. State-Based Behavior
+- Different responses based on:
+  - Print status
+  - Probe status
+  - Current Z height
+  - Previous commands
 
-## License
-GNU GENERAL PUBLIC LICENSE Version 3
+## Implementation Considerations
+
+### 1. Performance
+- Asynchronous command execution
+- Minimal state storage
+- Efficient event handling
+
+### 2. Reliability
+- Robust error handling
+- State recovery mechanisms
+- Clear status feedback
+
+### 3. Maintainability
+- Modular design
+- Clear state management
+- Comprehensive logging
+
+## Integration Guidelines
+
+1. **Installation Requirements**
+   - Klipper firmware
+   - Moonraker server
+   - Python 3.7+
+   - Input device support
+
+2. **Configuration Steps**
+   - Key mapping setup
+   - Adjustment parameter tuning
+   - Macro integration
+
+3. **Testing Procedures**
+   - Command confirmation flow
+   - State management
+   - Error handling
+   - Recovery mechanisms

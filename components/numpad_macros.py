@@ -253,6 +253,10 @@ class NumpadMacros:
             await self._check_klippy_state()
             kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
 
+            if self.debug_log:
+                self.logger.debug(f"Handling adjustment - Key: {key}, Value: {value}")
+                self.logger.debug(f"Current state - Is probing: {self.is_probing}")
+
             if self.is_probing:
                 # Get current Z position
                 toolhead = await self._get_toolhead_position()
@@ -260,6 +264,7 @@ class NumpadMacros:
 
                 if self.debug_log:
                     self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
+                    self.logger.debug(f"Toolhead position: {toolhead}")
 
                 # Determine step size based on height
                 if current_z < 0.1:
@@ -320,6 +325,14 @@ class NumpadMacros:
 
             if self.debug_log:
                 self.logger.debug(f"Klippy state query result: {result}")
+                self.logger.debug(f"CHECK_PROBE_STATUS result: {result.get('gcode_macro CHECK_PROBE_STATUS', {})}")
+
+            probe_status = result.get('gcode_macro CHECK_PROBE_STATUS', {})
+            previous_probing = self.is_probing
+            self.is_probing = probe_status.get('monitor_active', False)
+
+            if self.debug_log:
+                self.logger.debug(f"Probe status change: {previous_probing} -> {self.is_probing}")
 
             self._is_printing = result.get('print_stats', {}).get('state', '') == 'printing'
 
