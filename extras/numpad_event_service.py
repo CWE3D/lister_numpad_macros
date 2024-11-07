@@ -5,12 +5,20 @@ import json
 import time
 import logging
 from logging.handlers import RotatingFileHandler
+from typing import Dict, Optional
 
 # Configuration
 MOONRAKER_URL = "http://localhost:7125"
 LOG_FILE = "/home/pi/printer_data/logs/numpad_event_service.log"
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
 BACKUP_COUNT = 3
+
+# Debounce configuration (in seconds)
+DEBOUNCE_CONFIG = {
+    "key_up": 0.1,  # 100ms debounce for up key
+    "key_down": 0.2,  # 100ms debounce for down key
+    "default": 0.05  # 50ms default debounce for other keys
+}
 
 # Scan code to key name mapping
 SCAN_CODE_MAPPING = {
@@ -53,6 +61,9 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+# Debounce state tracking
+last_key_time: Dict[str, float] = {}
+
 
 def send_to_moonraker(event_data):
     """Send key event data to Moonraker"""
@@ -74,18 +85,40 @@ def get_key_name(scan_code: int, original_name: str) -> str:
     return f"key_{original_name}"
 
 
+def get_debounce_time(key_name: str) -> float:
+    """Get the debounce time for a specific key"""
+    return DEBOUNCE_CONFIG.get(key_name, DEBOUNCE_CONFIG['default'])
+
+
+def should_process_key(key_name: str, current_time: float) -> bool:
+    """Check if enough time has passed since the last key press"""
+    last_time = last_key_time.get(key_name, 0)
+    debounce_time = get_debounce_time(key_name)
+
+    if current_time - last_time >= debounce_time:
+        last_key_time[key_name] = current_time
+        return True
+
+    return False
+
+
 def on_key_event(e):
-    """Handle key events - only process key down events"""
+    """Handle key events - only process key down events with debounce"""
     # Only process key down events
     if e.event_type == 'down':
-        # Get the appropriate key name based on scan code or fallback
+        current_time = time.time()
         key_name = get_key_name(e.scan_code, e.name)
+
+        # Check debounce
+        if not should_process_key(key_name, current_time):
+            logger.debug(f"Debounced key event: {key_name}")
+            return
 
         event_data = {
             "key": key_name,
             "scan_code": e.scan_code,
             "event_type": e.event_type,
-            "time": e.time
+            "time": current_time
         }
 
         logger.info(f"Key down event detected: {event_data}")
@@ -95,6 +128,9 @@ def on_key_event(e):
 def main():
     logger.info("Numpad Listener Service started")
     logger.info(f"Using scan code mapping for {len(SCAN_CODE_MAPPING)} special keys")
+    logger.info("Debounce configuration:")
+    for key, value in DEBOUNCE_CONFIG.items():
+        logger.info(f"- {key}: {value * 1000:.0f}ms")
 
     keyboard.hook(on_key_event)
 
