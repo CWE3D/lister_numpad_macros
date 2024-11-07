@@ -15,7 +15,7 @@ BACKUP_COUNT = 3
 
 # Debounce configuration (in seconds)
 DEBOUNCE_CONFIG = {
-    "key_up": 0.1,  # 100ms debounce for up key
+    "key_up": 0.3,  # 100ms debounce for up key
     "key_down": 0.3,  # 100ms debounce for down key
     "default": 0.05  # 50ms default debounce for other keys
 }
