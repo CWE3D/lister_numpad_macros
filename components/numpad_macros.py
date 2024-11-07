@@ -163,6 +163,7 @@ class NumpadMacros:
             self.logger.debug(f"State after command key - pending_key: {self.pending_key}, "
                               f"pending_command: {self.pending_command}")
 
+    # In the main event handler:
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
             event = web_request.get_args()
@@ -191,12 +192,8 @@ class NumpadMacros:
             if key in self.no_confirm_keys:
                 if self.debug_log:
                     self.logger.debug("Processing no-confirm key")
-                # For up/down keys, use a default adjustment value
                 if key in ['key_up', 'key_down']:
-                    adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
-                    if self.debug_log:
-                        self.logger.debug(f"Using adjustment value: {adjustment}")
-                    await self._handle_adjustment(key, adjustment)
+                    await self._handle_adjustment(key)
                     return {'status': 'executed'}
 
             # Finally process regular command keys
@@ -248,18 +245,17 @@ class NumpadMacros:
                 self.logger.debug("Cleared pending command state")
             self._notify_status_update()
 
-    async def _handle_adjustment(self, key: str, value: float) -> None:
+    # The updated _handle_adjustment method:
+    async def _handle_adjustment(self, key: str) -> None:
         """Handle immediate adjustment commands (up/down keys)"""
         try:
             if self.debug_log:
-                self.logger.debug(f"Starting adjustment handling - Key: {key}, Value: {value}")
+                self.logger.debug(f"Starting adjustment handling - Key: {key}")
 
             await self._check_klippy_state()
             if self.debug_log:
                 self.logger.debug(
                     f"Klippy state checked - is_probing: {self.is_probing}, is_printing: {self._is_printing}")
-
-            kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
 
             if self.is_probing:
                 # Get current Z position
@@ -280,9 +276,6 @@ class NumpadMacros:
                     if self.debug_log:
                         self.logger.debug(f"Using coarse adjustment with step size: {step_size:.3f}")
 
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
-                await kapis.run_gcode(cmd)
-
             elif self._is_printing:
                 # Get Z height to determine mode
                 toolhead = await self._get_toolhead_position()
@@ -292,46 +285,43 @@ class NumpadMacros:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
                 if current_z < 1.0:
-                    # Z offset adjustment
-                    if key == 'key_up':
-                        cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
-                    else:
-                        cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
-
+                    # Z offset adjustment during first layer
+                    adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
+                    cmd = f"SET_GCODE_OFFSET Z_ADJUST={adjustment} MOVE=1"
                     if self.debug_log:
                         self.logger.debug(f"First layer Z adjustment: {cmd}")
-                        # Then in the adjustment handler:
                 else:
                     # Speed adjustment using M220
+                    # Get current speed factor
+                    kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+                    result = await kapis.query_objects({'gcode_move': None})
+                    current_speed = result.get('gcode_move', {}).get('speed_factor', 1.0) * 100
+
                     increment = self.speed_settings["increment"]
                     max_speed = self.speed_settings["max"]
                     min_speed = self.speed_settings["min"]
 
+                    # Calculate new speed value
                     if key == 'key_up':
-                        # Increase speed
-                        if value + increment > max_speed:
-                            cmd = f"M220 S{max_speed}"
-                        else:
-                            cmd = f"M220 S+{increment}"
+                        new_speed = min(current_speed + increment, max_speed)
                     else:
-                        # Decrease speed
-                        if value - increment < min_speed:
-                            cmd = f"M220 S{min_speed}"
-                        else:
-                            cmd = f"M220 S-{increment}"
+                        new_speed = max(current_speed - increment, min_speed)
+
+                    # Set the absolute speed value
+                    cmd = f"M220 S{int(new_speed)}"
 
                     if self.debug_log:
                         self.logger.debug(
-                            f"Speed adjustment: {cmd} (current: {value}%, "
+                            f"Speed adjustment: {cmd} (previous: {current_speed}%, new: {new_speed}%, "
                             f"limits: {min_speed}%-{max_speed}%, step: {increment}%)"
                         )
 
-                # Execute the command
+            # Execute the command only once, using _execute_gcode which handles logging
+            if cmd:
                 if self.debug_log:
                     self.logger.debug(f"Executing adjustment command: {cmd}")
-
                 await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
-                await kapis.run_gcode(cmd)
+                await self._execute_gcode(cmd)
 
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
