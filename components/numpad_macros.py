@@ -257,6 +257,9 @@ class NumpadMacros:
                 self.logger.debug(
                     f"Klippy state checked - is_probing: {self.is_probing}, is_printing: {self._is_printing}")
 
+            # Initialize cmd as None
+            cmd = None
+
             if self.is_probing:
                 # Get current Z position
                 toolhead = await self._get_toolhead_position()
@@ -316,12 +319,15 @@ class NumpadMacros:
                             f"limits: {min_speed}%-{max_speed}%, step: {increment}%)"
                         )
 
-            # Execute the command only once, using _execute_gcode which handles logging
-            if cmd:
+            # Execute the command only if one was set
+            if cmd is not None:
                 if self.debug_log:
                     self.logger.debug(f"Executing adjustment command: {cmd}")
                 await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
                 await self._execute_gcode(cmd)
+            else:
+                if self.debug_log:
+                    self.logger.debug("No adjustment command was generated")
 
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
