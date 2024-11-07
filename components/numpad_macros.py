@@ -135,7 +135,7 @@ class NumpadMacros:
             if self.debug_log:
                 self.logger.debug(f"Received event - Key: {key}, Type: {event_type}")
                 self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
-                              f"pending_command: {self.pending_command}")
+                                  f"pending_command: {self.pending_command}")
 
             # Only process key down events
             if event_type != 'down':
@@ -154,15 +154,29 @@ class NumpadMacros:
             if key in self.no_confirm_keys:
                 if self.debug_log:
                     self.logger.debug(f"Processing no-confirmation key: {key}")
+
                 # Handle adjustment keys specially
                 if key in ['key_up', 'key_down']:
                     await self._handle_adjustment(key)
                 else:
-                    # Execute other no-confirmation commands directly
-                    await self._execute_gcode(self.command_mapping[key])
+                    # Execute command directly without query prefix
+                    command = self.command_mapping[key]
+                    if self.debug_log:
+                        self.logger.debug(f"Executing no-confirmation command: {command}")
+
+                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing {command}"')
+                    await self._execute_gcode(command)
+
+                    # Maintain status updates and notifications
+                    await self.server.send_event(
+                        "numpad_macros:command_executed",
+                        {'command': command}
+                    )
+                    self._notify_status_update()
+
                 return {'status': 'executed'}
 
-            # Finally, handle regular command keys
+            # Finally, handle regular command keys that need confirmation
             if self.debug_log:
                 self.logger.debug("Processing regular command key")
             await self._handle_command_key(key)
@@ -173,7 +187,7 @@ class NumpadMacros:
             raise
 
     async def _handle_command_key(self, key: str) -> None:
-        """Handle regular command keys"""
+        """Handle regular command keys that require confirmation"""
         if self.debug_log:
             self.logger.debug(f"Processing command key: {key}")
 
@@ -187,7 +201,7 @@ class NumpadMacros:
         self.pending_key = key
         self.pending_command = self.command_mapping[key]
 
-        # Always run the QUERY version first
+        # Run the QUERY version for confirmation-required commands
         query_cmd = self.query_mapping[key]
         await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {query_cmd}"')
         await self._execute_gcode(query_cmd)
@@ -201,49 +215,6 @@ class NumpadMacros:
             "numpad_macros:command_queued",
             {'command': self.pending_command}
         )
-
-    # In the main event handler:
-    async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
-        try:
-            event = web_request.get_args()
-            key: str = event.get('key', '')
-            event_type: str = event.get('event_type', '')
-
-            if self.debug_log:
-                self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
-                                  f"pending_command: {self.pending_command}")
-                self.logger.debug(f"Received event: {event}")
-
-            # Only process key down events
-            if event_type != 'down':
-                if self.debug_log:
-                    self.logger.debug("Ignoring non-down event")
-                return {'status': 'ignored'}
-
-            # Process confirmation keys first
-            if key in self.confirmation_keys:
-                if self.debug_log:
-                    self.logger.debug("Processing confirmation key")
-                await self._handle_confirmation()
-                return {'status': 'confirmed'}
-
-            # Then process no-confirm keys (up/down)
-            if key in self.no_confirm_keys:
-                if self.debug_log:
-                    self.logger.debug("Processing no-confirm key")
-                if key in ['key_up', 'key_down']:
-                    await self._handle_adjustment(key)
-                    return {'status': 'executed'}
-
-            # Finally process regular command keys
-            if self.debug_log:
-                self.logger.debug("Processing regular command key")
-            await self._handle_command_key(key)
-            return {'status': 'queued'}
-
-        except Exception as e:
-            self.logger.exception("Error processing numpad event")
-            raise
 
     async def _handle_confirmation(self) -> None:
         """Handle confirmation key press"""
