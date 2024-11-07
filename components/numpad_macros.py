@@ -30,15 +30,17 @@ class NumpadMacros:
         self.z_adjust_increment = config.getfloat(
             'z_adjust_increment', 0.01, above=0., below=1.
         )
-        self.speed_adjust_increment = config.getfloat(
-            'speed_adjust_increment', 0.05, above=0., below=1.
-        )
-        self.min_speed_factor = config.getfloat(
-            'min_speed_factor', 0.2, above=0., below=1.
-        )
-        self.max_speed_factor = config.getfloat(
-            'max_speed_factor', 2.0, above=1.
-        )
+
+        # Get speed settings from config with defaults
+        default_speed_settings = {
+            "increment": 10,
+            "max": 300,
+            "min": 20
+        }
+        self.speed_settings = config.getdict('speed_settings', default=default_speed_settings)
+
+        if self.debug_log:
+            self.logger.debug(f"Loaded speed settings: {self.speed_settings}")
 
         # Add configuration for probe adjustments
         self.probe_min_step = config.getfloat(
@@ -298,11 +300,31 @@ class NumpadMacros:
 
                     if self.debug_log:
                         self.logger.debug(f"First layer Z adjustment: {cmd}")
+                        # Then in the adjustment handler:
                 else:
-                    # Simple speed adjustment
-                    cmd = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={value}"
+                    # Speed adjustment using M220
+                    increment = self.speed_settings["increment"]
+                    max_speed = self.speed_settings["max"]
+                    min_speed = self.speed_settings["min"]
+
+                    if key == 'key_up':
+                        # Increase speed
+                        if value + increment > max_speed:
+                            cmd = f"M220 S{max_speed}"
+                        else:
+                            cmd = f"M220 S+{increment}"
+                    else:
+                        # Decrease speed
+                        if value - increment < min_speed:
+                            cmd = f"M220 S{min_speed}"
+                        else:
+                            cmd = f"M220 S-{increment}"
+
                     if self.debug_log:
-                        self.logger.debug(f"Speed adjustment: {cmd}")
+                        self.logger.debug(
+                            f"Speed adjustment: {cmd} (current: {value}%, "
+                            f"limits: {min_speed}%-{max_speed}%, step: {increment}%)"
+                        )
 
                 # Execute the command
                 if self.debug_log:
