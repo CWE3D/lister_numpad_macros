@@ -36,19 +36,11 @@ class NumpadMacros:
             'max_speed_factor', 2.0, above=1.
         )
 
-        # Get keys that don't require confirmation
-        no_confirm_default = ['key_up', 'key_down']
-        no_confirm_str = config.get('no_confirmation_keys', ','.join(no_confirm_default))
-        self.no_confirm_keys: SetType[str] = set(key.strip() for key in no_confirm_str.split(','))
+        # Define keys that don't require confirmation (direct execution)
+        self.no_confirm_keys: SetType[str] = {'key_up', 'key_down'}
 
-        # Get confirmation keys
-        confirm_default = ['key_enter', 'key_enter_alt']
-        confirm_str = config.get('confirmation_keys', ','.join(confirm_default))
-        self.confirmation_keys: SetType[str] = set(key.strip() for key in confirm_str.split(','))
-
-        if self.debug_log:
-            self.logger.debug(f"Keys without confirmation requirement: {self.no_confirm_keys}")
-            self.logger.debug(f"Keys that can confirm actions: {self.confirmation_keys}")
+        # Define confirmation keys
+        self.confirmation_keys: SetType[str] = {'key_enter', 'key_enter_alt'}
 
         # Get command mappings from config
         self.command_mapping: Dict[str, str] = {}
@@ -57,6 +49,7 @@ class NumpadMacros:
 
         # State tracking
         self.pending_key: Optional[str] = None
+        self.pending_command: Optional[str] = None
         self.is_probing: bool = False
         self._is_printing: bool = False
 
@@ -97,43 +90,12 @@ class NumpadMacros:
         for key in key_options:
             cmd = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
             self.command_mapping[key] = cmd
-            # Create query version of command
-            if not cmd.startswith("_"):
+            # Create query version of command if it starts with uppercase letter
+            # (indicating it's a regular command and not a special _QUERY_ command)
+            if not cmd.startswith('_'):
                 self.query_mapping[key] = f"_QUERY_{cmd}"
             else:
                 self.query_mapping[key] = cmd
-
-    async def _handle_ready(self) -> None:
-        """Handle Klippy ready event"""
-        await self._check_klippy_state()
-
-    async def _handle_shutdown(self) -> None:
-        """Handle Klippy shutdown event"""
-        self._reset_state()
-
-    def _reset_state(self) -> None:
-        """Reset all state variables"""
-        self.pending_key = None
-        self._is_printing = False
-        self.is_probing = False
-        self._notify_status_update()
-
-    async def _check_klippy_state(self) -> None:
-        """Update internal state based on Klippy status"""
-        kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
-        try:
-            result = await kapis.query_objects({
-                'print_stats': None,
-                'probe': None
-            })
-            self._is_printing = result.get('print_stats', {}).get('state', '') == 'printing'
-            self.is_probing = result.get('probe', {}).get('last_query', False)
-            self._notify_status_update()
-        except Exception:
-            msg = f"{self.name}: Error fetching Klippy state"
-            self.logger.exception(msg)
-            self._reset_state()
-            raise self.server.error(msg, 503)
 
     async def _handle_numpad_event(
             self, web_request: WebRequest
@@ -161,13 +123,16 @@ class NumpadMacros:
             if event_type != 'down':
                 return {'status': 'ignored'}
 
-            if key in ['key_up', 'key_down'] and value is not None:
-                # Handle direct adjustment values from event service
-                await self._handle_adjustment(key, value)
+            # Process the key event based on its type
+            if key in self.no_confirm_keys:
+                # Direct execution for up/down keys
+                if value is not None:
+                    await self._handle_adjustment(key, value)
             elif key in self.confirmation_keys:
                 # Handle confirmation key press
                 await self._handle_confirmation()
             else:
+                # Handle regular command key
                 await self._handle_command_key(key)
 
             return {'status': 'ok'}
@@ -177,24 +142,55 @@ class NumpadMacros:
             self.logger.exception(msg)
             raise self.server.error(msg, 500)
 
+    async def _handle_command_key(self, key: str) -> None:
+        """Handle regular command keys"""
+        if key not in self.command_mapping:
+            if self.debug_log:
+                self.logger.debug(f"No command mapped for key: {key}")
+            return
+
+        # Store as pending command (replaces any existing pending command)
+        self.pending_key = key
+        self.pending_command = self.command_mapping[key]
+
+        # Execute query version if available
+        query_cmd = self.query_mapping.get(key)
+        if query_cmd:
+            try:
+                await self._execute_gcode(query_cmd)
+            except Exception as e:
+                self.logger.exception(f"Error executing query command: {str(e)}")
+
+        self._notify_status_update()
+        self.server.send_event(
+            "numpad_macros:command_queued",
+            {'command': self.pending_command}
+        )
+
     async def _handle_confirmation(self) -> None:
         """Handle confirmation key press"""
-        if not self.pending_key:
+        if not self.pending_key or not self.pending_command:
+            if self.debug_log:
+                self.logger.debug("No pending command to execute")
             return
 
         try:
-            cmd = self.command_mapping[self.pending_key]
-            await self._execute_gcode(cmd)
+            # Execute the pending command
+            await self._execute_gcode(self.pending_command)
             self.server.send_event(
                 "numpad_macros:command_executed",
-                {'command': cmd}
+                {'command': self.pending_command}
             )
+        except Exception as e:
+            self.logger.exception(f"Error executing command: {str(e)}")
         finally:
+            # Clear pending command state
             self.pending_key = None
+            self.pending_command = None
             self._notify_status_update()
 
     async def _handle_adjustment(self, key: str, value: float) -> None:
-        """Handle adjustment with direct value"""
+        """Handle immediate adjustment commands (up/down keys)"""
         try:
             # Update Klippy state
             await self._check_klippy_state()
@@ -220,55 +216,58 @@ class NumpadMacros:
             self.logger.exception(msg)
             raise self.server.error(msg, 500)
 
-    async def _handle_command_key(self, key: str) -> None:
-        """Handle regular command keys"""
-        if key not in self.command_mapping:
-            if self.debug_log:
-                self.logger.debug(f"No command mapped for key: {key}")
-            return
+    def get_status(self) -> Dict[str, Any]:
+        """Return component status"""
+        return {
+            'command_mapping': self.command_mapping,
+            'query_mapping': self.query_mapping,
+            'pending_key': self.pending_key,
+            'pending_command': self.pending_command,
+            'is_printing': self._is_printing,
+            'is_probing': self.is_probing,
+            'no_confirm_keys': list(self.no_confirm_keys),
+            'confirmation_keys': list(self.confirmation_keys)
+        }
 
-        if key in self.no_confirm_keys:
-            # Direct execution without confirmation for specified keys
-            try:
-                cmd = self.command_mapping[key]
-                await self._execute_gcode(cmd)
-                self.server.send_event(
-                    "numpad_macros:command_executed",
-                    {'command': cmd}
-                )
-            except Exception as e:
-                self.logger.exception(f"Error executing command for key {key}: {str(e)}")
-            return
-
-        # Store as pending command (replaces any existing pending command)
-        self.pending_key = key
-
-        # Execute query version if available
-        query_cmd = self.query_mapping.get(key)
-        if query_cmd:
-            await self._execute_gcode(query_cmd)
-
-        self._notify_status_update()
+    def _notify_status_update(self) -> None:
+        """Notify clients of status changes"""
         self.server.send_event(
-            "numpad_macros:command_queued",
-            {'command': self.command_mapping[key]}
+            "numpad_macros:status_update",
+            self.get_status()
         )
 
-    async def _handle_enter_key(self) -> None:
-        """Handle enter key press"""
-        if not self.pending_key:
-            return
+    async def _handle_ready(self) -> None:
+        """Handle Klippy ready event"""
+        await self._check_klippy_state()
 
+    async def _handle_shutdown(self) -> None:
+        """Handle Klippy shutdown event"""
+        self._reset_state()
+
+    def _reset_state(self) -> None:
+        """Reset all state variables"""
+        self.pending_key = None
+        self.pending_command = None  # This was missing
+        self._is_printing = False
+        self.is_probing = False
+        self._notify_status_update()
+
+    async def _check_klippy_state(self) -> None:
+        """Update internal state based on Klippy status"""
+        kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
         try:
-            cmd = self.command_mapping[self.pending_key]
-            await self._execute_gcode(cmd)
-            self.server.send_event(
-                "numpad_macros:command_executed",
-                {'command': cmd}
-            )
-        finally:
-            self.pending_key = None
+            result = await kapis.query_objects({
+                'print_stats': None,
+                'probe': None
+            })
+            self._is_printing = result.get('print_stats', {}).get('state', '') == 'printing'
+            self.is_probing = result.get('probe', {}).get('last_query', False)
             self._notify_status_update()
+        except Exception:
+            msg = f"{self.name}: Error fetching Klippy state"
+            self.logger.exception(msg)
+            self._reset_state()
+            raise self.server.error(msg, 503)
 
     async def _get_toolhead_position(self) -> Dict[str, float]:
         """Get current toolhead position"""
@@ -289,33 +288,6 @@ class NumpadMacros:
     ) -> Dict[str, Any]:
         """Handle status request endpoint"""
         return {'status': self.get_status()}
-
-    def get_status(self) -> Dict[str, Any]:
-        """Return component status"""
-        return {
-            'command_mapping': self.command_mapping,
-            'query_mapping': self.query_mapping,
-            'pending_key': self.pending_key,
-            'is_printing': self._is_printing,
-            'is_probing': self.is_probing,
-            'no_confirm_keys': list(self.no_confirm_keys),
-            'confirmation_keys': list(self.confirmation_keys),
-            'config': {
-                'debug_log': self.debug_log,
-                'z_adjust_increment': self.z_adjust_increment,
-                'speed_adjust_increment': self.speed_adjust_increment,
-                'min_speed_factor': self.min_speed_factor,
-                'max_speed_factor': self.max_speed_factor
-            }
-        }
-
-    def _notify_status_update(self) -> None:
-        """Notify clients of status changes"""
-        self.server.send_event(
-            "numpad_macros:status_update",
-            self.get_status()
-        )
-
 
 def load_component(config: ConfigHelper) -> NumpadMacros:
     return NumpadMacros(config)
