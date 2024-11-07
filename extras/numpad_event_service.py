@@ -13,12 +13,15 @@ LOG_FILE = "/home/pi/printer_data/logs/numpad_event_service.log"
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
 BACKUP_COUNT = 3
 
-# Debounce configuration (in seconds)
+# Debounce configuration (in milliseconds)
 DEBOUNCE_CONFIG = {
-    "key_up": 0.6,  # 100ms debounce for up key
-    "key_down": 0.6,  # 100ms debounce for down key
-    "default": 0.05  # 50ms default debounce for other keys
+    "key_up": 300,    # 100ms for up key
+    "key_down": 300,  # 100ms for down key
+    "default": 50     # 50ms default for other keys
 }
+
+# Request timeout (in seconds)
+REQUEST_TIMEOUT = 0.5  # 500ms timeout for Moonraker requests
 
 # Scan code to key name mapping
 SCAN_CODE_MAPPING = {
@@ -64,16 +67,20 @@ logger.addHandler(handler)
 # Debounce state tracking
 last_key_time: Dict[str, float] = {}
 
-
 def send_to_moonraker(event_data):
-    """Send key event data to Moonraker"""
+    """Send key event data to Moonraker with timeout"""
     try:
-        response = requests.post(f"{MOONRAKER_URL}/server/numpad/event", json=event_data)
+        response = requests.post(
+            f"{MOONRAKER_URL}/server/numpad/event",
+            json=event_data,
+            timeout=REQUEST_TIMEOUT
+        )
         response.raise_for_status()
         logger.info(f"Sent event data to Moonraker: {event_data}")
+    except requests.Timeout:
+        logger.warning("Moonraker request timed out - likely busy with macro")
     except requests.RequestException as e:
         logger.error(f"Error sending event data to Moonraker: {e}")
-
 
 def get_key_name(scan_code: int, original_name: str) -> str:
     """Get mapped key name from scan code or fallback to original with key_ prefix"""
@@ -84,23 +91,24 @@ def get_key_name(scan_code: int, original_name: str) -> str:
     # If no mapping exists, fallback to adding key_ prefix to original name
     return f"key_{original_name}"
 
-
 def get_debounce_time(key_name: str) -> float:
-    """Get the debounce time for a specific key"""
-    return DEBOUNCE_CONFIG.get(key_name, DEBOUNCE_CONFIG['default'])
-
+    """Get the debounce time for a specific key (converts ms to seconds)"""
+    ms_time = DEBOUNCE_CONFIG.get(key_name, DEBOUNCE_CONFIG['default'])
+    return ms_time / 1000.0  # Convert milliseconds to seconds
 
 def should_process_key(key_name: str, current_time: float) -> bool:
     """Check if enough time has passed since the last key press"""
     last_time = last_key_time.get(key_name, 0)
     debounce_time = get_debounce_time(key_name)
+    time_diff = current_time - last_time
 
-    if current_time - last_time >= debounce_time:
+    if time_diff >= debounce_time:
         last_key_time[key_name] = current_time
+        logger.debug(f"Processing key {key_name}: time since last press = {time_diff*1000:.1f}ms")
         return True
 
+    logger.debug(f"Debounced key {key_name}: time since last press = {time_diff*1000:.1f}ms < {debounce_time*1000:.1f}ms")
     return False
-
 
 def on_key_event(e):
     """Handle key events - only process key down events with debounce"""
@@ -124,19 +132,17 @@ def on_key_event(e):
         logger.info(f"Key down event detected: {event_data}")
         send_to_moonraker(event_data)
 
-
 def main():
     logger.info("Numpad Listener Service started")
     logger.info(f"Using scan code mapping for {len(SCAN_CODE_MAPPING)} special keys")
     logger.info("Debounce configuration:")
     for key, value in DEBOUNCE_CONFIG.items():
-        logger.info(f"- {key}: {value * 1000:.0f}ms")
+        logger.info(f"- {key}: {value}ms")
 
     keyboard.hook(on_key_event)
 
     logger.info("Listening for key down events...")
     keyboard.wait()
-
 
 if __name__ == "__main__":
     main()
