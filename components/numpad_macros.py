@@ -162,19 +162,15 @@ class NumpadMacros:
                               f"pending_command: {self.pending_command}")
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
-        """Handle incoming numpad events"""
-        if self.debug_log:
-            self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
-                              f"pending_command: {self.pending_command}")
-            self.logger.debug(f"Received event: {web_request.get_args()}")
-
         try:
             event = web_request.get_args()
             key: str = event.get('key', '')
             event_type: str = event.get('event_type', '')
 
             if self.debug_log:
-                self.logger.debug(f"Processing key: {key}, type: {event_type}")
+                self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
+                                  f"pending_command: {self.pending_command}")
+                self.logger.debug(f"Received event: {event}")
 
             # Only process key down events
             if event_type != 'down':
@@ -189,14 +185,17 @@ class NumpadMacros:
                 await self._handle_confirmation()
                 return {'status': 'confirmed'}
 
-            # Then process no-confirm keys
+            # Then process no-confirm keys (up/down)
             if key in self.no_confirm_keys:
                 if self.debug_log:
                     self.logger.debug("Processing no-confirm key")
-                value = event.get('value')
-                if value is not None:
-                    await self._handle_adjustment(key, value)
-                return {'status': 'executed'}
+                # For up/down keys, use a default adjustment value
+                if key in ['key_up', 'key_down']:
+                    adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
+                    if self.debug_log:
+                        self.logger.debug(f"Using adjustment value: {adjustment}")
+                    await self._handle_adjustment(key, adjustment)
+                    return {'status': 'executed'}
 
             # Finally process regular command keys
             if self.debug_log:
@@ -250,12 +249,15 @@ class NumpadMacros:
     async def _handle_adjustment(self, key: str, value: float) -> None:
         """Handle immediate adjustment commands (up/down keys)"""
         try:
-            await self._check_klippy_state()
-            kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
-
             if self.debug_log:
-                self.logger.debug(f"Handling adjustment - Key: {key}, Value: {value}")
-                self.logger.debug(f"Current state - Is probing: {self.is_probing}")
+                self.logger.debug(f"Starting adjustment handling - Key: {key}, Value: {value}")
+
+            await self._check_klippy_state()
+            if self.debug_log:
+                self.logger.debug(
+                    f"Klippy state checked - is_probing: {self.is_probing}, is_printing: {self._is_printing}")
+
+            kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
 
             if self.is_probing:
                 # Get current Z position
@@ -264,55 +266,29 @@ class NumpadMacros:
 
                 if self.debug_log:
                     self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
-                    self.logger.debug(f"Toolhead position: {toolhead}")
 
                 # Determine step size based on height
                 if current_z < 0.1:
-                    # Fine adjustment - just use + or -
                     cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}"
                     if self.debug_log:
-                        self.logger.debug("Using fine adjustment mode")
+                        self.logger.debug(f"Using fine adjustment mode: {cmd}")
                 else:
-                    # Coarse adjustment - calculate step size
                     step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
                     cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}{step_size:.3f}"
                     if self.debug_log:
                         self.logger.debug(f"Using coarse adjustment with step size: {step_size:.3f}")
 
-                await self._execute_gcode(
-                    f'RESPOND MSG="Numpad macros: {cmd}"'
-                )
+                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
                 await kapis.run_gcode(cmd)
 
-            elif self._is_printing:
-                # Get Z height to determine mode
-                toolhead = await self._get_toolhead_position()
-                if toolhead['z'] < 1.0:
-                    # Z offset adjustment
-                    adjustment = value  # Convert your incoming value to the right adjustment
-
-                    if key == 'key_up':
-                        cmd = f"SET_GCODE_OFFSET Z={adjustment:.3f} MOVE=1"
-                    else:
-                        # For down movement, convert to positive and use negative sign
-                        cmd = f"SET_GCODE_OFFSET Z=-{abs(adjustment):.3f} MOVE=1"
-
-                    if self.debug_log:
-                        self.logger.debug(f"Z offset adjustment: {cmd}")
-
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
-                    await kapis.run_gcode(cmd)
-                else:
-                    # Speed adjustment
-                    cmd = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={value}"
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Speed adjustment factor={value}"')
-                    await kapis.run_gcode(cmd)
+                if self.debug_log:
+                    self.logger.debug(f"Executed probe adjustment command: {cmd}")
 
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
-            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
             self.logger.exception(msg)
-            raise self.server.error(msg, 500)
+            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
+            raise
 
     async def _check_klippy_state(self) -> None:
         """Update internal state based on Klippy status"""
