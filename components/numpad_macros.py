@@ -22,19 +22,6 @@ class NumpadMacros:
         else:
             self.logger.setLevel(logging.INFO)
 
-        # Get keys that don't require confirmation
-        no_confirm_default = ['key_up', 'key_down', 'key_enter', 'key_enter_alt']
-        no_confirm_str = config.get('no_confirmation_keys', ','.join(no_confirm_default))
-        self.no_confirm_keys: SetType[str] = set(key.strip() for key in no_confirm_str.split(','))
-
-        if self.debug_log:
-            self.logger.debug(f"Keys without confirmation requirement: {self.no_confirm_keys}")
-
-        # Get command mappings from config
-        self.command_mapping: Dict[str, str] = {}
-        self.query_mapping: Dict[str, str] = {}
-        self._load_command_mapping(config)
-
         # Get configuration values
         self.z_adjust_increment = config.getfloat(
             'z_adjust_increment', 0.01, above=0., below=1.
@@ -48,6 +35,20 @@ class NumpadMacros:
         self.max_speed_factor = config.getfloat(
             'max_speed_factor', 2.0, above=1.
         )
+
+        # Get keys that don't require confirmation
+        no_confirm_default = ['key_up', 'key_down']
+        no_confirm_str = config.get('no_confirmation_keys', ','.join(no_confirm_default))
+        self.no_confirm_keys: SetType[str] = set(key.strip() for key in no_confirm_str.split(','))
+
+        # Get confirmation keys
+        confirm_default = ['key_enter', 'key_enter_alt']
+        confirm_str = config.get('confirmation_keys', ','.join(confirm_default))
+        self.confirmation_keys: SetType[str] = set(key.strip() for key in confirm_str.split(','))
+
+        if self.debug_log:
+            self.logger.debug(f"Keys without confirmation requirement: {self.no_confirm_keys}")
+            self.logger.debug(f"Keys that can confirm actions: {self.confirmation_keys}")
 
         # Get command mappings from config
         self.command_mapping: Dict[str, str] = {}
@@ -160,11 +161,12 @@ class NumpadMacros:
             if event_type != 'down':
                 return {'status': 'ignored'}
 
-            if key in ['up', 'down'] and value is not None:
+            if key in ['key_up', 'key_down'] and value is not None:
                 # Handle direct adjustment values from event service
                 await self._handle_adjustment(key, value)
-            elif key == 'enter':
-                await self._handle_enter_key()
+            elif key in self.confirmation_keys:
+                # Handle confirmation key press
+                await self._handle_confirmation()
             else:
                 await self._handle_command_key(key)
 
@@ -174,6 +176,22 @@ class NumpadMacros:
             msg = f"Error processing numpad event: {str(e)}"
             self.logger.exception(msg)
             raise self.server.error(msg, 500)
+
+    async def _handle_confirmation(self) -> None:
+        """Handle confirmation key press"""
+        if not self.pending_key:
+            return
+
+        try:
+            cmd = self.command_mapping[self.pending_key]
+            await self._execute_gcode(cmd)
+            self.server.send_event(
+                "numpad_macros:command_executed",
+                {'command': cmd}
+            )
+        finally:
+            self.pending_key = None
+            self._notify_status_update()
 
     async def _handle_adjustment(self, key: str, value: float) -> None:
         """Handle adjustment with direct value"""
@@ -222,7 +240,7 @@ class NumpadMacros:
                 self.logger.exception(f"Error executing command for key {key}: {str(e)}")
             return
 
-        # Store pending command for keys that need confirmation
+        # Store as pending command (replaces any existing pending command)
         self.pending_key = key
 
         # Execute query version if available
@@ -281,6 +299,7 @@ class NumpadMacros:
             'is_printing': self._is_printing,
             'is_probing': self.is_probing,
             'no_confirm_keys': list(self.no_confirm_keys),
+            'confirmation_keys': list(self.confirmation_keys),
             'config': {
                 'debug_log': self.debug_log,
                 'z_adjust_increment': self.z_adjust_increment,
