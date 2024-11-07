@@ -20,7 +20,6 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-
 def send_to_moonraker(event_data):
     """Send key event data to Moonraker"""
     try:
@@ -30,25 +29,25 @@ def send_to_moonraker(event_data):
     except requests.RequestException as e:
         logger.error(f"Error sending event data to Moonraker: {e}")
 
-
 def on_key_event(e):
-    """Handle key events"""
-    event_data = {
-        "key": e.name,
-        "scan_code": e.scan_code,
-        "event_type": e.event_type,
-        "time": e.time
-    }
-    logger.info(f"Key event detected: {event_data}")
-    send_to_moonraker(event_data)
-
+    """Handle key events - only process key down events"""
+    # Only process key down events
+    if e.event_type == 'down':
+        event_data = {
+            "key": e.name,
+            "scan_code": e.scan_code,
+            "event_type": e.event_type,
+            "time": e.time
+        }
+        logger.info(f"Key down event detected: {event_data}")
+        send_to_moonraker(event_data)
 
 def main():
     logger.info("Numpad Listener Service started")
 
     keyboard.hook(on_key_event)
 
-    logger.info("Listening for all key events...")
+    logger.info("Listening for key down events...")
     keyboard.wait()
 
 
