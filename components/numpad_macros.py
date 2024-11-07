@@ -1,6 +1,3 @@
-# Numpad Macros Component for Moonraker
-#
-# Copyright (C) 2024
 from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Dict, Any, Optional
@@ -10,17 +7,23 @@ if TYPE_CHECKING:
     from ..common import WebRequest
     from .klippy_apis import KlippyAPI
     from .job_state import JobState
-    from .klippy_connection import KlippyConnection
+
 
 class NumpadMacros:
     def __init__(self, config: ConfigHelper) -> None:
-        # Core initialization
         self.server = config.get_server()
         self.event_loop = self.server.get_event_loop()
         self.name = config.get_name()
 
-        # Get configuration options with validation
+        # Initialize component logger
         self.debug_log = config.getboolean('debug_log', False)
+        self.logger = logging.getLogger(f"moonraker.{self.name}")
+        if self.debug_log:
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.INFO)
+
+        # Get configuration values
         self.z_adjust_increment = config.getfloat(
             'z_adjust_increment', 0.01, above=0., below=1.
         )
@@ -34,29 +37,28 @@ class NumpadMacros:
             'max_speed_factor', 2.0, above=1.
         )
 
-        # Component references
-        self.kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+        # Get command mappings from config
+        self.command_mapping: Dict[str, str] = {}
+        self.query_mapping: Dict[str, str] = {}
+        self._load_command_mapping(config)
 
-        # State tracking with typing
-        self.is_printing: bool = False
+        # State tracking
+        self.pending_key: Optional[str] = None
         self.is_probing: bool = False
-        self.current_z: float = 0.0
-        self._cached_speed_factor: float = 1.0
+        self._is_printing: bool = False
 
         # Register endpoints
         self.server.register_endpoint(
-            "/server/numpad/event",
-            ['POST'],
-            self._handle_numpad_event
+            "/server/numpad/event", ['POST'], self._handle_numpad_event
         )
         self.server.register_endpoint(
-            "/server/numpad/status",
-            ['GET'],
-            self._handle_status_request
+            "/server/numpad/status", ['GET'], self._handle_status_request
         )
 
         # Register notifications
         self.server.register_notification('numpad_macros:status_update')
+        self.server.register_notification('numpad_macros:command_queued')
+        self.server.register_notification('numpad_macros:command_executed')
 
         # Register event handlers
         self.server.register_event_handler(
@@ -65,185 +67,208 @@ class NumpadMacros:
         self.server.register_event_handler(
             "server:klippy_shutdown", self._handle_shutdown
         )
-        self.server.register_event_handler(
-            "server:klippy_disconnect", self._handle_disconnect
-        )
 
         if self.debug_log:
-            logging.debug(f"{self.name}: Component Initialized")
+            self.logger.debug(f"{self.name}: Component Initialized")
+
+    def _load_command_mapping(self, config: ConfigHelper) -> None:
+        """Load command mappings from config"""
+        key_options = [
+            'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
+            'key_6', 'key_7', 'key_8', 'key_9', 'key_0',
+            'key_dot', 'key_enter'
+        ]
+        for key in key_options:
+            cmd = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
+            self.command_mapping[key] = cmd
+            # Create query version of command
+            if not cmd.startswith("_"):
+                self.query_mapping[key] = f"_QUERY_{cmd}"
+            else:
+                self.query_mapping[key] = cmd
 
     async def _handle_ready(self) -> None:
-        """Called when Klippy reports ready"""
-        await self._fetch_initial_state()
-        if self.debug_log:
-            logging.debug("Numpad ready with initial state")
+        """Handle Klippy ready event"""
+        await self._check_klippy_state()
 
     async def _handle_shutdown(self) -> None:
-        """Called when Klippy enters shutdown state"""
-        self.is_printing = False
+        """Handle Klippy shutdown event"""
+        self._reset_state()
+
+    def _reset_state(self) -> None:
+        """Reset all state variables"""
+        self.pending_key = None
+        self._is_printing = False
+        self.is_probing = False
         self._notify_status_update()
 
-    async def _handle_disconnect(self) -> None:
-        """Called when Klippy disconnects"""
-        self.is_printing = False
-        self._notify_status_update()
-
-    async def _fetch_initial_state(self) -> None:
-        """Fetch initial state from Klippy"""
+    async def _check_klippy_state(self) -> None:
+        """Update internal state based on Klippy status"""
+        kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
         try:
-            status = await self.kapis.query_objects({
+            result = await kapis.query_objects({
                 'print_stats': None,
-                'toolhead': None,
-                'gcode_move': None
+                'probe': None
             })
-            self.is_printing = status.get('print_stats', {}).get('state', '') == 'printing'
-            position = status.get('toolhead', {}).get('position', [0, 0, 0, 0])
-            self.current_z = position[2]
-            self._cached_speed_factor = status.get('gcode_move', {}).get(
-                'speed_factor', 1.0
-            )
+            self._is_printing = result.get('print_stats', {}).get('state', '') == 'printing'
+            self.is_probing = result.get('probe', {}).get('last_query', False)
             self._notify_status_update()
         except Exception:
-            msg = f"{self.name}: Error fetching initial state"
-            logging.exception(msg)
-            self.server.add_warning(msg)
-
-    def _notify_status_update(self) -> None:
-        """Notify clients of a status change"""
-        self.server.send_event(
-            "numpad_macros:status_update",
-            self.get_status()
-        )
-
-    async def _handle_status_request(
-        self, web_request: WebRequest
-    ) -> Dict[str, Any]:
-        """Handle status request endpoint"""
-        return {'status': self.get_status()}
+            msg = f"{self.name}: Error fetching Klippy state"
+            self.logger.exception(msg)
+            self._reset_state()
+            raise self.server.error(msg, 503)
 
     async def _handle_numpad_event(
-        self, web_request: WebRequest
+            self, web_request: WebRequest
     ) -> Dict[str, Any]:
-        """Process incoming numpad events"""
-        if not await self._check_klippy_ready():
-            raise self.server.error("Klippy not ready", 503)
+        """Handle incoming numpad events"""
+        klippy_conn = self.server.lookup_component('klippy_connection')
+        if not klippy_conn.is_connected():
+            raise self.server.error("Klippy not connected", 503)
 
         try:
             event = web_request.get_args()
             if self.debug_log:
-                logging.debug(f"{self.name}: Received event: {event}")
+                self.logger.debug(f"Received event: {event}")
 
             key: str = event.get('key', '')
             event_type: str = event.get('event_type', '')
+            value: Optional[float] = event.get('value', None)
 
-            if not key or not event_type:
+            if not key or not event_type or event_type not in ['down', 'up']:
                 raise self.server.error(
-                    "Missing required fields 'key' or 'event_type'", 400
+                    f"Invalid event data: {event}", 400
                 )
 
-            if event_type == 'down':
-                if key in ['up', 'down']:
-                    await self._handle_special_key(f"key_{key}")
-                else:
-                    await self._execute_gcode(f"_{key.upper()}")
-                self._notify_status_update()
+            # Only process key down events
+            if event_type != 'down':
+                return {'status': 'ignored'}
 
-            return {'status': "ok"}
+            if key in ['up', 'down'] and value is not None:
+                # Handle direct adjustment values from event service
+                await self._handle_adjustment(key, value)
+            elif key == 'enter':
+                await self._handle_enter_key()
+            else:
+                await self._handle_command_key(key)
+
+            return {'status': 'ok'}
 
         except Exception as e:
             msg = f"Error processing numpad event: {str(e)}"
-            logging.exception(msg)
-            raise self.server.error(msg, 500) from e
+            self.logger.exception(msg)
+            raise self.server.error(msg, 500)
 
-    async def _check_klippy_ready(self) -> bool:
-        """Verify Klippy is ready to process commands"""
-        klippy_conn: KlippyConnection = self.server.lookup_component('klippy_connection')
-        return (
-                klippy_conn.is_connected() and
-                klippy_conn.is_ready()
+    async def _handle_adjustment(self, key: str, value: float) -> None:
+        """Handle adjustment with direct value"""
+        try:
+            # Update Klippy state
+            await self._check_klippy_state()
+            kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+
+            if self.is_probing:
+                # Handle probe adjustment
+                cmd = f"TESTZ Z={value}"
+                await kapis.run_gcode(cmd)
+            elif self._is_printing:
+                # Get Z height to determine mode
+                toolhead = await self._get_toolhead_position()
+                if toolhead['z'] < 1.0:
+                    # Z offset adjustment
+                    cmd = f"SET_GCODE_OFFSET Z_ADJUST={value} MOVE=1"
+                else:
+                    # Speed adjustment
+                    cmd = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={value}"
+                await kapis.run_gcode(cmd)
+
+        except Exception as e:
+            msg = f"Error handling adjustment: {str(e)}"
+            self.logger.exception(msg)
+            raise self.server.error(msg, 500)
+
+    async def _handle_command_key(self, key: str) -> None:
+        """Handle regular command keys"""
+        cmd_key = f"key_{key}"
+        if cmd_key not in self.command_mapping:
+            if self.debug_log:
+                self.logger.debug(f"No command mapped for key: {key}")
+            return
+
+        # Store pending command
+        self.pending_key = cmd_key
+
+        # Execute query version if available
+        query_cmd = self.query_mapping.get(cmd_key)
+        if query_cmd:
+            await self._execute_gcode(query_cmd)
+
+        self._notify_status_update()
+        self.server.send_event(
+            "numpad_macros:command_queued",
+            {'command': self.command_mapping[cmd_key]}
         )
 
-    async def _handle_special_key(self, key: str) -> None:
-        """Handle special key events (up/down)"""
+    async def _handle_enter_key(self) -> None:
+        """Handle enter key press"""
+        if not self.pending_key:
+            return
+
         try:
-            # Update current state
-            status = await self.kapis.query_objects({
-                'print_stats': None,
-                'toolhead': None,
-                'gcode_move': None
-            })
-            self.is_printing = status.get('print_stats', {}).get('state', '') == 'printing'
-            position = status.get('toolhead', {}).get('position', [0, 0, 0, 0])
-            self.current_z = position[2]
-            self._cached_speed_factor = status.get('gcode_move', {}).get(
-                'speed_factor', self._cached_speed_factor
+            cmd = self.command_mapping[self.pending_key]
+            await self._execute_gcode(cmd)
+            self.server.send_event(
+                "numpad_macros:command_executed",
+                {'command': cmd}
             )
+        finally:
+            self.pending_key = None
+            self._notify_status_update()
 
-            if key == 'key_up':
-                if self.current_z < 1.0 and self.is_printing:
-                    await self._adjust_z(self.z_adjust_increment)
-                else:
-                    await self._adjust_speed(self.speed_adjust_increment)
-            elif key == 'key_down':
-                if self.current_z < 1.0 and self.is_printing:
-                    await self._adjust_z(-self.z_adjust_increment)
-                else:
-                    await self._adjust_speed(-self.speed_adjust_increment)
-
-        except Exception:
-            msg = f"{self.name}: Error handling special key: {key}"
-            logging.exception(msg)
-            self.server.add_warning(msg)
+    async def _get_toolhead_position(self) -> Dict[str, float]:
+        """Get current toolhead position"""
+        kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+        result = await kapis.query_objects({'toolhead': None})
+        pos = result.get('toolhead', {}).get('position', [0., 0., 0., 0.])
+        return {
+            'x': pos[0], 'y': pos[1], 'z': pos[2], 'e': pos[3]
+        }
 
     async def _execute_gcode(self, command: str) -> None:
-        """Execute a GCode command with error handling"""
-        try:
-            await self.kapis.run_gcode(command)
-        except Exception:
-            msg = f"{self.name}: Error executing gcode {command}"
-            logging.exception(msg)
-            self.server.add_warning(msg)
+        """Execute a gcode command"""
+        kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+        await kapis.run_gcode(command)
 
-    async def _adjust_z(self, adjustment: float) -> None:
-        """Adjust Z offset with bounds checking"""
-        try:
-            cmd = f"SET_GCODE_OFFSET Z_ADJUST={adjustment} MOVE=1"
-            await self.kapis.run_gcode(cmd)
-            self.current_z += adjustment
-        except Exception:
-            msg = f"{self.name}: Error adjusting Z by {adjustment}"
-            logging.exception(msg)
-            self.server.add_warning(msg)
-
-    async def _adjust_speed(self, adjustment: float) -> None:
-        """Adjust speed factor with bounds checking"""
-        try:
-            new_factor = max(
-                self.min_speed_factor,
-                min(self._cached_speed_factor + adjustment, self.max_speed_factor)
-            )
-            cmd = f"SET_VELOCITY_FACTOR FACTOR={new_factor}"
-            await self.kapis.run_gcode(cmd)
-            self._cached_speed_factor = new_factor
-        except Exception:
-            msg = f"{self.name}: Error adjusting speed by {adjustment}"
-            logging.exception(msg)
-            self.server.add_warning(msg)
+    async def _handle_status_request(
+            self, web_request: WebRequest
+    ) -> Dict[str, Any]:
+        """Handle status request endpoint"""
+        return {'status': self.get_status()}
 
     def get_status(self) -> Dict[str, Any]:
         """Return component status"""
         return {
-            'is_printing': self.is_printing,
-            'current_z': round(self.current_z, 6),
-            'speed_factor': round(self._cached_speed_factor, 2),
-            'debug_enabled': self.debug_log,
+            'command_mapping': self.command_mapping,
+            'query_mapping': self.query_mapping,
+            'pending_key': self.pending_key,
+            'is_printing': self._is_printing,
+            'is_probing': self.is_probing,
             'config': {
+                'debug_log': self.debug_log,
                 'z_adjust_increment': self.z_adjust_increment,
                 'speed_adjust_increment': self.speed_adjust_increment,
                 'min_speed_factor': self.min_speed_factor,
                 'max_speed_factor': self.max_speed_factor
             }
         }
+
+    def _notify_status_update(self) -> None:
+        """Notify clients of status changes"""
+        self.server.send_event(
+            "numpad_macros:status_update",
+            self.get_status()
+        )
+
 
 def load_component(config: ConfigHelper) -> NumpadMacros:
     return NumpadMacros(config)
