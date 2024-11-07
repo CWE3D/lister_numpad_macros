@@ -121,11 +121,12 @@ main() {
     # Update repository
     if update_repo; then
         # Only restart services if there were updates
-        restart_services
         verify_services
     else
         log_message "No updates found. Skipping service restart."
     fi
+
+    restart_services
 
     log_message "Update process completed!"
 
