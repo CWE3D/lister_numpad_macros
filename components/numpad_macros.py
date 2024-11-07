@@ -40,6 +40,14 @@ class NumpadMacros:
             'max_speed_factor', 2.0, above=1.
         )
 
+        # Add configuration for probe adjustments
+        self.probe_min_step = config.getfloat(
+            'probe_min_step', 0.01, above=0., below=1.
+        )
+        self.probe_coarse_multiplier = config.getfloat(
+            'probe_coarse_multiplier', 0.5, above=0., below=1.
+        )
+
         # Define keys that don't require confirmation (direct execution)
         self.no_confirm_keys: SetType[str] = {'key_up', 'key_down'}
         # Define confirmation keys first
@@ -242,27 +250,58 @@ class NumpadMacros:
     async def _handle_adjustment(self, key: str, value: float) -> None:
         """Handle immediate adjustment commands (up/down keys)"""
         try:
-            # Update Klippy state
             await self._check_klippy_state()
             kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
 
             if self.is_probing:
-                # Handle probe adjustment
-                cmd = f"TESTZ Z={value}"
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: Probe adjustment Z={value}"')
+                # Get current Z position
+                toolhead = await self._get_toolhead_position()
+                current_z = toolhead['z']
+
+                if self.debug_log:
+                    self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
+
+                # Determine step size based on height
+                if current_z < 0.1:
+                    # Fine adjustment - just use + or -
+                    cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}"
+                    if self.debug_log:
+                        self.logger.debug("Using fine adjustment mode")
+                else:
+                    # Coarse adjustment - calculate step size
+                    step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
+                    cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}{step_size:.3f}"
+                    if self.debug_log:
+                        self.logger.debug(f"Using coarse adjustment with step size: {step_size:.3f}")
+
+                await self._execute_gcode(
+                    f'RESPOND MSG="Numpad macros: {cmd}"'
+                )
                 await kapis.run_gcode(cmd)
+
             elif self._is_printing:
                 # Get Z height to determine mode
                 toolhead = await self._get_toolhead_position()
                 if toolhead['z'] < 1.0:
                     # Z offset adjustment
-                    cmd = f"SET_GCODE_OFFSET Z_ADJUST={value} MOVE=1"
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Z offset adjustment {value}"')
+                    adjustment = value  # Convert your incoming value to the right adjustment
+
+                    if key == 'key_up':
+                        cmd = f"SET_GCODE_OFFSET Z={adjustment:.3f} MOVE=1"
+                    else:
+                        # For down movement, convert to positive and use negative sign
+                        cmd = f"SET_GCODE_OFFSET Z=-{abs(adjustment):.3f} MOVE=1"
+
+                    if self.debug_log:
+                        self.logger.debug(f"Z offset adjustment: {cmd}")
+
+                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
+                    await kapis.run_gcode(cmd)
                 else:
                     # Speed adjustment
                     cmd = f"SET_VELOCITY_LIMIT VELOCITY_FACTOR={value}"
                     await self._execute_gcode(f'RESPOND MSG="Numpad macros: Speed adjustment factor={value}"')
-                await kapis.run_gcode(cmd)
+                    await kapis.run_gcode(cmd)
 
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
@@ -276,17 +315,30 @@ class NumpadMacros:
         try:
             result = await kapis.query_objects({
                 'print_stats': None,
-                'probe': None
+                'gcode_macro CHECK_PROBE_STATUS': None  # Query our macro
             })
+
+            if self.debug_log:
+                self.logger.debug(f"Klippy state query result: {result}")
+
             self._is_printing = result.get('print_stats', {}).get('state', '') == 'printing'
-            self.is_probing = result.get('probe', {}).get('last_query', False)
+
+            # Get probe status from the macro's variables
+            probe_status = result.get('gcode_macro CHECK_PROBE_STATUS', {})
+            self.is_probing = probe_status.get('monitor_active', False)
+
             if self.debug_log:
                 await self._execute_gcode(
-                    f'RESPOND MSG="Numpad macros: State update - Printing: {self._is_printing}, Probing: {self.is_probing}"'
+                    f'RESPOND MSG="Numpad macros: State update - '
+                    f'Printing: {self._is_printing}, '
+                    f'Probing: {self.is_probing}, '
+                    f'Probe Status: {probe_status}"'
                 )
+
             self._notify_status_update()
-        except Exception:
-            msg = f"{self.name}: Error fetching Klippy state"
+
+        except Exception as e:
+            msg = f"{self.name}: Error fetching Klippy state: {str(e)}"
             await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
             self.logger.exception(msg)
             self._reset_state()
