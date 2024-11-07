@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 
 # Configuration
 MOONRAKER_URL = "http://localhost:7125"
-LOG_FILE = "/var/log/numpad_listener.log"
+LOG_FILE = "/home/pi/printer_data/logs/numpad_event_service.log"
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
 BACKUP_COUNT = 3
 
