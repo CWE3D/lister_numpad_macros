@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import TYPE_CHECKING, Dict, Any, Optional, Set as SetType
 
 if TYPE_CHECKING:
     from ..confighelper import ConfigHelper
@@ -21,6 +21,19 @@ class NumpadMacros:
             self.logger.setLevel(logging.DEBUG)
         else:
             self.logger.setLevel(logging.INFO)
+
+        # Get keys that don't require confirmation
+        no_confirm_default = ['key_up', 'key_down', 'key_enter', 'key_enter_alt']
+        no_confirm_str = config.get('no_confirmation_keys', ','.join(no_confirm_default))
+        self.no_confirm_keys: SetType[str] = set(key.strip() for key in no_confirm_str.split(','))
+
+        if self.debug_log:
+            self.logger.debug(f"Keys without confirmation requirement: {self.no_confirm_keys}")
+
+        # Get command mappings from config
+        self.command_mapping: Dict[str, str] = {}
+        self.query_mapping: Dict[str, str] = {}
+        self._load_command_mapping(config)
 
         # Get configuration values
         self.z_adjust_increment = config.getfloat(
@@ -196,7 +209,20 @@ class NumpadMacros:
                 self.logger.debug(f"No command mapped for key: {key}")
             return
 
-        # Store pending command
+        if key in self.no_confirm_keys:
+            # Direct execution without confirmation for specified keys
+            try:
+                cmd = self.command_mapping[key]
+                await self._execute_gcode(cmd)
+                self.server.send_event(
+                    "numpad_macros:command_executed",
+                    {'command': cmd}
+                )
+            except Exception as e:
+                self.logger.exception(f"Error executing command for key {key}: {str(e)}")
+            return
+
+        # Store pending command for keys that need confirmation
         self.pending_key = key
 
         # Execute query version if available
@@ -254,6 +280,7 @@ class NumpadMacros:
             'pending_key': self.pending_key,
             'is_printing': self._is_printing,
             'is_probing': self.is_probing,
+            'no_confirm_keys': list(self.no_confirm_keys),
             'config': {
                 'debug_log': self.debug_log,
                 'z_adjust_increment': self.z_adjust_increment,
