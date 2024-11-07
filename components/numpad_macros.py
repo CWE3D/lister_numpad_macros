@@ -77,7 +77,7 @@ class NumpadMacros:
         if self.debug_log:
             self.logger.debug(f"{self.name}: Component Initialized")
 
-    def _load_command_mapping(self, config: ConfigHelper) -> None:
+    async def _load_command_mapping(self, config: ConfigHelper) -> None:
         """Load command mappings from config"""
         key_options = [
             'key_1', 'key_2', 'key_3', 'key_4', 'key_5',
@@ -88,17 +88,48 @@ class NumpadMacros:
             'key_9_alt', 'key_0_alt', 'key_dot_alt', 'key_enter_alt'
         ]
         for key in key_options:
-            cmd = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
-            self.command_mapping[key] = cmd
-            # Create query version of command if it starts with uppercase letter
-            # (indicating it's a regular command and not a special _QUERY_ command)
-            if not cmd.startswith('_'):
-                self.query_mapping[key] = f"_QUERY_{cmd}"
-            else:
-                self.query_mapping[key] = cmd
+            # Store the command exactly as configured
+            self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
+            # Create QUERY version by adding prefix
+            self.query_mapping[key] = f"QUERY_{self.command_mapping[key]}"
+
+            if self.debug_log:
+                await self._execute_gcode(
+                    f'RESPOND MSG="Numpad macros: Loaded mapping for {key} -> Command: {self.command_mapping[key]}, Query: {self.query_mapping[key]}"'
+                )
+
+    async def _handle_command_key(self, key: str) -> None:
+        """Handle regular command keys"""
+        if key not in self.command_mapping:
+            await self._execute_gcode(f'RESPOND MSG="Numpad macros: No command mapped for key {key}"')
+            return
+
+        # Store as pending command (replaces any existing pending command)
+        if self.pending_key and self.pending_key != key:
+            await self._execute_gcode(
+                f'RESPOND MSG="Numpad macros: Replacing pending command {self.command_mapping[key]}"'
+            )
+
+        # Store the pending command
+        self.pending_key = key
+        self.pending_command = self.command_mapping[key]
+
+        # Always run the QUERY version first
+        await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query for {self.pending_command}"')
+        await self._execute_gcode(self.query_mapping[key])
+
+        await self._execute_gcode(
+            f'RESPOND MSG="Numpad macros: Command {self.pending_command} is ready. Press ENTER to execute"'
+        )
+
+        self._notify_status_update()
+        self.server.send_event(
+            "numpad_macros:command_queued",
+            {'command': self.pending_command}
+        )
 
     async def _handle_numpad_event(
-        self, web_request: WebRequest
+            self, web_request: WebRequest
     ) -> Dict[str, Any]:
         """Handle incoming numpad events"""
         klippy_conn = self.server.lookup_component('klippy_connection')
@@ -110,7 +141,8 @@ class NumpadMacros:
             event = web_request.get_args()
             if self.debug_log:
                 self.logger.debug(f"Received event: {event}")
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: Received {event.get("key", "unknown")} key event"')
+                await self._execute_gcode(
+                    f'RESPOND MSG="Numpad macros: Received {event.get("key", "unknown")} key event"')
 
             key: str = event.get('key', '')
             event_type: str = event.get('event_type', '')
@@ -128,18 +160,14 @@ class NumpadMacros:
             if key in self.no_confirm_keys:
                 # Direct execution for up/down keys
                 if value is not None:
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Direct execution of {key} with value {value}"')
+                    await self._execute_gcode(
+                        f'RESPOND MSG="Numpad macros: Direct execution of {key} with value {value}"')
                     await self._handle_adjustment(key, value)
             elif key in self.confirmation_keys:
                 # Handle confirmation key press
-                if self.pending_command:
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Confirming command {self.pending_command}"')
-                else:
-                    await self._execute_gcode('RESPOND MSG="Numpad macros: No command pending for confirmation"')
                 await self._handle_confirmation()
             else:
                 # Handle regular command key
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: Processing command key {key}"')
                 await self._handle_command_key(key)
 
             return {'status': 'ok'}
@@ -149,40 +177,6 @@ class NumpadMacros:
             await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
             self.logger.exception(msg)
             raise self.server.error(msg, 500)
-
-    async def _handle_command_key(self, key: str) -> None:
-        """Handle regular command keys"""
-        if key not in self.command_mapping:
-            await self._execute_gcode(f'RESPOND MSG="Numpad macros: No command mapped for key {key}"')
-            return
-
-        # Store as pending command (replaces any existing pending command)
-        if self.pending_key and self.pending_key != key:
-            await self._execute_gcode(
-                f'RESPOND MSG="Numpad macros: Replacing pending command {self.pending_command} with new key {key}"'
-            )
-
-        self.pending_key = key
-        self.pending_command = self.command_mapping[key]
-
-        # Execute query version
-        query_cmd = self.query_mapping.get(key)
-        if query_cmd:
-            try:
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {query_cmd} for key {key}"')
-                await self._execute_gcode(query_cmd)
-            except Exception as e:
-                await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: Error executing query: {str(e)}"')
-                self.logger.exception(f"Error executing query command: {str(e)}")
-
-        await self._execute_gcode(
-            f'RESPOND MSG="Numpad macros: Command {self.pending_command} is ready. Press ENTER to execute"'
-        )
-        self._notify_status_update()
-        self.server.send_event(
-            "numpad_macros:command_queued",
-            {'command': self.pending_command}
-        )
 
     async def _handle_confirmation(self) -> None:
         """Handle confirmation key press"""
