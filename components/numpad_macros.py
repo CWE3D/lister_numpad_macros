@@ -21,6 +21,11 @@ class NumpadMacros:
         else:
             self.logger.setLevel(logging.INFO)
 
+        self.pending_key: Optional[str] = None
+        self.pending_command: Optional[str] = None
+        if self.debug_log:
+            self.logger.debug("Initial state - pending_key: None, pending_command: None")
+
         # Get configuration values
         self.z_adjust_increment = config.getfloat(
             'z_adjust_increment', 0.01, above=0., below=1.
@@ -110,9 +115,9 @@ class NumpadMacros:
 
     async def _handle_command_key(self, key: str) -> None:
         """Handle regular command keys"""
-        if key not in self.command_mapping:
-            await self._execute_gcode(f'RESPOND MSG="Numpad macros: No command mapped for key {key}"')
-            return
+        if self.debug_log:
+            self.logger.debug(f"State before command key - pending_key: {self.pending_key}, "
+                              f"pending_command: {self.pending_command}")
 
         # Only process if key is not a no-confirm key
         if key not in self.no_confirm_keys:
@@ -144,79 +149,94 @@ class NumpadMacros:
             # Direct execution for no-confirm keys
             await self._execute_gcode(self.command_mapping[key])
 
-    async def _handle_numpad_event(
-            self, web_request: WebRequest
-    ) -> Dict[str, Any]:
+        if self.debug_log:
+            self.logger.debug(f"State after command key - pending_key: {self.pending_key}, "
+                              f"pending_command: {self.pending_command}")
+
+    async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         """Handle incoming numpad events"""
-        klippy_conn = self.server.lookup_component('klippy_connection')
-        if not klippy_conn.is_connected():
-            await self._execute_gcode('RESPOND TYPE=error MSG="Numpad macros: Klippy not connected"')
-            raise self.server.error("Klippy not connected", 503)
+        if self.debug_log:
+            self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
+                              f"pending_command: {self.pending_command}")
+            self.logger.debug(f"Received event: {web_request.get_args()}")
 
         try:
             event = web_request.get_args()
-            if self.debug_log:
-                self.logger.debug(f"Received event: {event}")
-                await self._execute_gcode(
-                    f'RESPOND MSG="Numpad macros: Received {event.get("key", "unknown")} key event"')
-
             key: str = event.get('key', '')
             event_type: str = event.get('event_type', '')
-            value: Optional[float] = event.get('value', None)
 
-            if not key or not event_type or event_type not in ['down', 'up']:
-                await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: Invalid event data - {event}"')
-                raise self.server.error(f"Invalid event data: {event}", 400)
+            if self.debug_log:
+                self.logger.debug(f"Processing key: {key}, type: {event_type}")
 
             # Only process key down events
             if event_type != 'down':
+                if self.debug_log:
+                    self.logger.debug("Ignoring non-down event")
                 return {'status': 'ignored'}
 
-            # Process the key event based on its type
-            if key in self.no_confirm_keys:
-                # Direct execution for up/down keys
-                if value is not None:
-                    await self._execute_gcode(
-                        f'RESPOND MSG="Numpad macros: Direct execution of {key} with value {value}"')
-                    await self._handle_adjustment(key, value)
-            elif key in self.confirmation_keys:
-                # Handle confirmation key press
+            # Process confirmation keys first
+            if key in self.confirmation_keys:
+                if self.debug_log:
+                    self.logger.debug("Processing confirmation key")
                 await self._handle_confirmation()
-            else:
-                # Handle regular command key
-                await self._handle_command_key(key)
+                return {'status': 'confirmed'}
 
-            return {'status': 'ok'}
+            # Then process no-confirm keys
+            if key in self.no_confirm_keys:
+                if self.debug_log:
+                    self.logger.debug("Processing no-confirm key")
+                value = event.get('value')
+                if value is not None:
+                    await self._handle_adjustment(key, value)
+                return {'status': 'executed'}
+
+            # Finally process regular command keys
+            if self.debug_log:
+                self.logger.debug("Processing regular command key")
+            await self._handle_command_key(key)
+            return {'status': 'queued'}
 
         except Exception as e:
-            msg = f"Error processing numpad event: {str(e)}"
-            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
-            self.logger.exception(msg)
-            raise self.server.error(msg, 500)
+            self.logger.exception("Error processing numpad event")
+            raise
 
     async def _handle_confirmation(self) -> None:
         """Handle confirmation key press"""
+        if self.debug_log:
+            self.logger.debug(f"Handling confirmation with state - pending_key: {self.pending_key}, "
+                            f"pending_command: {self.pending_command}")
+
         if not self.pending_key or not self.pending_command:
+            if self.debug_log:
+                self.logger.debug("No pending command to confirm")
             await self._execute_gcode('RESPOND MSG="Numpad macros: No command pending for confirmation"')
             return
 
         try:
-            # Execute the pending command
+            # Store command locally before clearing state
             cmd = self.pending_command
+            if self.debug_log:
+                self.logger.debug(f"Executing confirmed command: {cmd}")
+
+            # Execute the command
             await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing confirmed command {cmd}"')
             await self._execute_gcode(cmd)
+
+            # Notify of execution
             await self.server.send_event(
                 "numpad_macros:command_executed",
                 {'command': cmd}
             )
+
         except Exception as e:
-            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: Error executing command: {str(e)}"')
             self.logger.exception(f"Error executing command: {str(e)}")
+            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: Error executing command: {str(e)}"')
         finally:
             # Clear pending command state
-            await self._execute_gcode('RESPOND MSG="Numpad macros: Command execution complete, clearing pending state"')
             self.pending_key = None
             self.pending_command = None
+            if self.debug_log:
+                self.logger.debug("Cleared pending command state")
             self._notify_status_update()
 
     async def _handle_adjustment(self, key: str, value: float) -> None:
