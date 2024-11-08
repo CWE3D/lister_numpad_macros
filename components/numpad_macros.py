@@ -298,9 +298,15 @@ class NumpadMacros:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
                 if current_z < 1.0:
-                    # Z offset adjustment during first layer
-                    adjustment = self.z_adjust_increment if key == 'key_up' else -self.z_adjust_increment
-                    cmd = f"SET_GCODE_OFFSET Z_ADJUST={adjustment} MOVE=1"
+                    # Z offset adjustment
+                    ## NOTE LOGIC CANNOT BE SIMPLIFIED
+                    ## This is intentionally two separate strings as one cannot pass a negative
+                    ## value to Z_ADJUST={-5} (the negative is a string), string is "Z_ADJUST=-"
+                    if key == 'key_up':
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
+                    else:
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
+
                     if self.debug_log:
                         self.logger.debug(f"First layer Z adjustment: {cmd}")
                 else:
