@@ -363,7 +363,7 @@ class NumpadMacros:
             })
 
             if self.debug_log:
-                self.logger.debug(f"Klippy state query result: {result}")
+                self.logger.debug(f'Klippy state query result: {result}')
                 self.logger.debug(f"CHECK_PROBE_STATUS result: {result.get('gcode_macro CHECK_PROBE_STATUS', {})}")
 
             probe_status = result.get('gcode_macro CHECK_PROBE_STATUS', {})
