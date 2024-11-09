@@ -205,7 +205,7 @@ class NumpadMacros:
 
         # Run the QUERY version for confirmation-required commands
         query_cmd = self.query_mapping[key]
-        await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {query_cmd}"')
+        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'.format(query_cmd))
         await self._execute_gcode(query_cmd)
 
         await self._execute_gcode(
