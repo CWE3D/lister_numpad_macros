@@ -116,7 +116,7 @@ class NumpadMacros:
         ]
         for key in key_options:
             # Store the command exactly as configured
-            self.command_mapping[key] = config.get(key, f"RESPOND MSG=\"{key} not assigned\"")
+            self.command_mapping[key] = config.get(key, f'RESPOND MSG="{key} not assigned"')
             # Create QUERY version by adding prefix
             self.query_mapping[key] = f"_QUERY{self.command_mapping[key]}" \
                 if self.command_mapping[key].startswith('_') \
