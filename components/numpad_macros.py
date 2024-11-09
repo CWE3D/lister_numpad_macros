@@ -7,6 +7,9 @@ if TYPE_CHECKING:
     from moonraker.components.klippy_apis import KlippyAPI
     from moonraker.confighelper import ConfigHelper
 
+def strip_quotes(s):
+    return s.replace('"', '').replace("'", '')
+
 class NumpadMacros:
     def __init__(self, config: ConfigHelper) -> None:
         self.server = config.get_server()
@@ -124,8 +127,8 @@ class NumpadMacros:
 
             if self.debug_log:
                 self.logger.debug(
-                    f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
-                    f"Query: {self.query_mapping[key]}"
+                    f"Loaded mapping for {key} -> Command: {strip_quotes(self.command_mapping[key])}, "
+                    f"Query: {strip_quotes(self.query_mapping[key])}"
                 )
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
@@ -137,7 +140,7 @@ class NumpadMacros:
             if self.debug_log:
                 self.logger.debug(f"Received event - Key: {key}, Type: {event_type}")
                 self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
-                                  f"pending_command: {self.pending_command}")
+                                  f"pending_command: {strip_quotes(self.pending_command)}")
 
             # Only process key down events
             if event_type != 'down':
@@ -164,9 +167,9 @@ class NumpadMacros:
                     # Execute command directly without query prefix
                     command = self.command_mapping[key]
                     if self.debug_log:
-                        self.logger.debug(f"Executing no-confirmation command: {command}")
+                        self.logger.debug(f"Executing no-confirmation command: {strip_quotes(command)}")
 
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing {command}"')
+                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing {strip_quotes(command)}"')
                     await self._execute_gcode(command)
 
                     # Maintain status updates and notifications
@@ -196,7 +199,7 @@ class NumpadMacros:
         # Store as pending command (replaces any existing pending command)
         if self.pending_key and self.pending_key != key:
             await self._execute_gcode(
-                f'RESPOND MSG="Numpad macros: Replacing pending command {self.command_mapping[self.pending_key]}"'
+                f'RESPOND MSG="Numpad macros: Replacing pending command {strip_quotes(self.command_mapping[self.pending_key])}"'
             )
 
         # Store the pending command
@@ -205,11 +208,11 @@ class NumpadMacros:
 
         # Run the QUERY version for confirmation-required commands
         query_cmd = self.query_mapping[key]
-        await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {query_cmd}"')
+        await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {strip_quotes(query_cmd)}"')
         await self._execute_gcode(query_cmd)
 
         await self._execute_gcode(
-            f'RESPOND MSG="Numpad macros: Command {self.pending_command} is ready. Press ENTER to execute"'
+            f'RESPOND MSG="Numpad macros: Command {strip_quotes(self.pending_command)} is ready. Press ENTER to execute"'
         )
 
         self._notify_status_update()
@@ -222,7 +225,7 @@ class NumpadMacros:
         """Handle confirmation key press"""
         if self.debug_log:
             self.logger.debug(f"Handling confirmation with state - pending_key: {self.pending_key}, "
-                            f"pending_command: {self.pending_command}")
+                            f"pending_command: {strip_quotes(self.pending_command)}")
 
         if not self.pending_key or not self.pending_command:
             if self.debug_log:
@@ -234,10 +237,10 @@ class NumpadMacros:
             # Store command locally before clearing state
             cmd = self.pending_command
             if self.debug_log:
-                self.logger.debug(f"Executing confirmed command: {cmd}")
+                self.logger.debug(f"Executing confirmed command: {strip_quotes(cmd)}")
 
             # Execute the command
-            await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing confirmed command {cmd}"')
+            await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing confirmed command {strip_quotes(cmd)}"')
             await self._execute_gcode(cmd)
 
             # Notify of execution
@@ -340,8 +343,8 @@ class NumpadMacros:
             # Execute the command only if one was set
             if cmd is not None:
                 if self.debug_log:
-                    self.logger.debug(f"Executing adjustment command: {cmd}")
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
+                    self.logger.debug(f"Executing adjustment command: {strip_quotes(cmd)}")
+                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {strip_quotes(cmd)}"')
                 await self._execute_gcode(cmd)
             else:
                 if self.debug_log:
@@ -350,7 +353,7 @@ class NumpadMacros:
         except Exception as e:
             msg = f"Error handling adjustment: {str(e)}"
             self.logger.exception(msg)
-            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
+            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {strip_quotes(msg)}"')
             raise
 
     async def _check_klippy_state(self) -> None:
