@@ -121,9 +121,9 @@ class NumpadMacros:
         ]
         for key in key_options:
             # Store the command exactly as configured
-            self.command_mapping[key] = config.get(key, None)
+            self.command_mapping[key] = config.get(key, '')
             # Create QUERY version by adding prefix
-            if self.query_mapping[key] is not None: continue
+            if key != '': continue
             self.query_mapping[key] = f"_QUERY{self.command_mapping[key]}" \
                 if self.command_mapping[key].startswith('_') \
                 else f"_QUERY_{self.command_mapping[key]}"
