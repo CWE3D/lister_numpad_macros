@@ -75,7 +75,7 @@ class NumpadMacros:
             self.logger.debug(f"Confirmation keys: {self.confirmation_keys}")
 
         # Get command mappings from config
-        self.command_mapping: Dict[str, Optional[str]] = {}
+        self.command_mapping: Dict[str,str] = {}
         self.initial_query_command_mapping: Dict[str, str] = {}
         self._load_command_mapping(config)
 
@@ -135,11 +135,11 @@ class NumpadMacros:
                             f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
                             f"Query: {self.initial_query_command_mapping[key]}"
                         )
-                else:
-                    self.command_mapping[key] = None
-            else:
-                # Option not in config
-                self.command_mapping[key] = None
+            #     else:
+            #         self.command_mapping[key] = None
+            # else:
+            #     # Option not in config
+            #     self.command_mapping[key] = None
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
@@ -152,10 +152,10 @@ class NumpadMacros:
                 self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
                                   f"pending_command: {self.pending_command}")
 
-            if self.command_mapping[key] is None:
-                await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'
-                                          .format(key=key))
-                return {'status': 'ignored'}
+            # if self.command_mapping[key] is None:
+            #     await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'
+            #                               .format(key=key))
+            #     return {'status': 'ignored'}
 
             # Only process key down events
             # TODO: What is going on here...
