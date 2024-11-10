@@ -1,6 +1,11 @@
 from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Dict, Any, Optional, Set as SetType
+import re
+
+def strip_comments(code):
+    # This regex removes everything after a '#' unless it's inside a string
+    return re.sub(r'(?<!["\'])#.*', '', code)
 
 if TYPE_CHECKING:
     from moonraker.common import WebRequest
@@ -205,7 +210,7 @@ class NumpadMacros:
 
         # Run the QUERY version for confirmation-required commands
         query_cmd = self.query_mapping[key]
-        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'.format(query_cmd))
+        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'.format(strip_comments(query_cmd)))
         await self._execute_gcode(query_cmd)
 
         await self._execute_gcode(
