@@ -76,7 +76,7 @@ class NumpadMacros:
 
         # Get command mappings from config
         self.command_mapping: Dict[str, Optional[str]] = {}
-        self.query_mapping: Dict[str, str] = {}
+        self.initial_query_command_mapping: Dict[str, str] = {}
         self._load_command_mapping(config)
 
         # State tracking
@@ -124,16 +124,16 @@ class NumpadMacros:
             # Check if the option exists in config
             if config.has_option(key):
                 # Get the command value, strip whitespace
-                cmd = config.get(key).strip()
+                cmd = config.get(key)
                 if cmd:  # If command is not empty after stripping
                     self.command_mapping[key] = cmd
                     # Create QUERY version by adding prefix
-                    self.query_mapping[key] = f"_QUERY{cmd}" if cmd.startswith('_') else f"_QUERY_{cmd}"
+                    self.initial_query_command_mapping[key] = f"_QUERY{cmd}" if cmd.startswith('_') else f"_QUERY_{cmd}"
 
                     if self.debug_log:
                         self.logger.debug(
                             f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
-                            f"Query: {self.query_mapping[key]}"
+                            f"Query: {self.initial_query_command_mapping[key]}"
                         )
                 else:
                     self.command_mapping[key] = None
@@ -157,12 +157,14 @@ class NumpadMacros:
                                           .format(key=key))
                 return {'status': 'ignored'}
 
-                # Only process key down events
-            if event_type != 'down':
-                if self.debug_log:
-                    self.logger.debug("Ignoring non-down event")
-                return {'status': 'ignored'}
+            # Only process key down events
+            # TODO: What is going on here...
+            # if event_type != 'down':
+            #     if self.debug_log:
+            #         self.logger.debug("Ignoring non-down event")
+            #     return {'status': 'ignored'}
 
+            # THE MOST 1ST ORDER IMPORTANT KEY
             # First, check if it's a confirmation key
             if key in self.confirmation_keys:
                 if self.debug_log:
@@ -170,15 +172,19 @@ class NumpadMacros:
                 await self._handle_confirmation()
                 return {'status': 'confirmed'}
 
+            # THESE COMMAND RUN DIRECTLY AND 2ND ORDER
             # Then check if it's a no-confirmation key
             if key in self.no_confirm_keys:
                 if self.debug_log:
                     self.logger.debug(f"Processing no-confirmation key: {key}")
 
                 # Handle adjustment keys specially
+                # Check if we are dealing with up and down, they are special 3RD ORDER
                 if key in ['key_up', 'key_down']:
                     await self._handle_adjustment(key)
                 else:
+                    # Now we can run the query command directly because
+                    # we are dealing with real command as is no confirmation key.
                     # Execute command directly without query prefix
                     command = self.command_mapping[key]
                     if self.debug_log:
@@ -199,6 +205,7 @@ class NumpadMacros:
             # Finally, handle regular command keys that need confirmation
             if self.debug_log:
                 self.logger.debug("Processing regular command key")
+
             await self._handle_command_key(key)
             return {'status': 'queued'}
 
@@ -212,11 +219,11 @@ class NumpadMacros:
             self.logger.debug(f"Processing command key: {key}")
 
         # Check if command exists
-        if self.command_mapping[key] is None or key not in self.query_mapping:
-            await self._execute_gcode(
-                'RESPOND MSG="Numpad macros: No command mapping for {}"'.format(key)
-            )
-            return
+        # if self.command_mapping[key] is None or key not in self.initial_query_command_mapping:
+        #     await self._execute_gcode(
+        #         'RESPOND MSG="Numpad macros: No command mapping for {}"'.format(key)
+        #     )
+        #     return
 
         # Store as pending command (replaces any existing pending command)
         if self.pending_key and self.pending_key != key:
@@ -230,7 +237,7 @@ class NumpadMacros:
         self.pending_command = self.command_mapping[key]
 
         # Run the QUERY version for confirmation-required commands
-        query_cmd = self.query_mapping[key]
+        query_cmd = self.initial_query_command_mapping[key]
         await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'
                                 .format(query_cmd))
         await self._execute_gcode(query_cmd)
@@ -429,7 +436,7 @@ class NumpadMacros:
         """Return component status"""
         return {
             'command_mapping': self.command_mapping,
-            'query_mapping': self.query_mapping,
+            'query_mapping': self.initial_query_command_mapping,
             'pending_key': self.pending_key,
             'pending_command': self.pending_command,
             'is_printing': self._is_printing,
