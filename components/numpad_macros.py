@@ -153,9 +153,11 @@ class NumpadMacros:
                                   f"pending_command: {self.pending_command}")
 
             if self.command_mapping[key] is None:
-                await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'.format(key=key))
+                await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'
+                                          .format(key=key))
+                return {'status': 'ignored'}
 
-            # Only process key down events
+                # Only process key down events
             if event_type != 'down':
                 if self.debug_log:
                     self.logger.debug("Ignoring non-down event")
@@ -208,6 +210,13 @@ class NumpadMacros:
         """Handle regular command keys that require confirmation"""
         if self.debug_log:
             self.logger.debug(f"Processing command key: {key}")
+
+        # Check if command exists
+        if self.command_mapping[key] is None or key not in self.query_mapping:
+            await self._execute_gcode(
+                'RESPOND MSG="Numpad macros: No command mapping for {}"'.format(key)
+            )
+            return
 
         # Store as pending command (replaces any existing pending command)
         if self.pending_key and self.pending_key != key:
