@@ -5,7 +5,7 @@ import re
 
 def strip_comments(code):
     # This regex removes everything after a '#' unless it's inside a string
-    return re.sub(r'(?<!["\'])#.*', '', code)
+    return code.strip()
 
 if TYPE_CHECKING:
     from moonraker.common import WebRequest
