@@ -75,7 +75,7 @@ class NumpadMacros:
             self.logger.debug(f"Confirmation keys: {self.confirmation_keys}")
 
         # Get command mappings from config
-        self.command_mapping: Dict[str, str] = {}
+        self.command_mapping: Dict[str, Optional[str]] = {}
         self.query_mapping: Dict[str, str] = {}
         self._load_command_mapping(config)
 
@@ -119,20 +119,27 @@ class NumpadMacros:
             'key_5_alt', 'key_6_alt', 'key_7_alt', 'key_8_alt',
             'key_9_alt', 'key_0_alt', 'key_dot_alt', 'key_enter_alt'
         ]
-        for key in key_options:
-            # Store the command exactly as configured
-            self.command_mapping[key] = config.get(key, '')
-            # Create QUERY version by adding prefix
-            if key != '': continue
-            self.query_mapping[key] = f"_QUERY{self.command_mapping[key]}" \
-                if self.command_mapping[key].startswith('_') \
-                else f"_QUERY_{self.command_mapping[key]}"
 
-            if self.debug_log:
-                self.logger.debug(
-                    f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
-                    f"Query: {self.query_mapping[key]}"
-                )
+        for key in key_options:
+            # Check if the option exists in config
+            if config.has_option(key):
+                # Get the command value, strip whitespace
+                cmd = config.get(key).strip()
+                if cmd:  # If command is not empty after stripping
+                    self.command_mapping[key] = cmd
+                    # Create QUERY version by adding prefix
+                    self.query_mapping[key] = f"_QUERY{cmd}" if cmd.startswith('_') else f"_QUERY_{cmd}"
+
+                    if self.debug_log:
+                        self.logger.debug(
+                            f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
+                            f"Query: {self.query_mapping[key]}"
+                        )
+                else:
+                    self.command_mapping[key] = None
+            else:
+                # Option not in config
+                self.command_mapping[key] = None
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
@@ -144,6 +151,9 @@ class NumpadMacros:
                 self.logger.debug(f"Received event - Key: {key}, Type: {event_type}")
                 self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
                                   f"pending_command: {self.pending_command}")
+
+            if self.command_mapping[key] is None:
+                await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'.format(key=key))
 
             # Only process key down events
             if event_type != 'down':
