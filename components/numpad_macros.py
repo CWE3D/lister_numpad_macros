@@ -171,7 +171,7 @@ class NumpadMacros:
                     if self.debug_log:
                         self.logger.debug(f"Executing no-confirmation command: {command}")
 
-                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing {command}"')
+                    await self._execute_gcode('RESPOND MSG="Numpad macros: Executing {}"'.format(strip_comments(command)))
                     await self._execute_gcode(command)
 
                     # Maintain status updates and notifications
@@ -201,7 +201,8 @@ class NumpadMacros:
         # Store as pending command (replaces any existing pending command)
         if self.pending_key and self.pending_key != key:
             await self._execute_gcode(
-                f'RESPOND MSG="Numpad macros: Replacing pending command {self.command_mapping[self.pending_key]}"'
+                'RESPOND MSG="Numpad macros: Replacing pending command {}"'
+                    .format(strip_comments(self.command_mapping[self.pending_key]))
             )
 
         # Store the pending command
@@ -210,11 +211,13 @@ class NumpadMacros:
 
         # Run the QUERY version for confirmation-required commands
         query_cmd = self.query_mapping[key]
-        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'.format(strip_comments(query_cmd)))
+        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'
+                                .format(strip_comments(query_cmd)))
         await self._execute_gcode(query_cmd)
 
         await self._execute_gcode(
-            f'RESPOND MSG="Numpad macros: Command {self.pending_command} is ready. Press ENTER to execute"'
+            'RESPOND MSG="Numpad macros: Command {} is ready. Press ENTER to execute"'
+                .format(strip_comments(self.pending_command))
         )
 
         self._notify_status_update()
@@ -242,7 +245,8 @@ class NumpadMacros:
                 self.logger.debug(f"Executing confirmed command: {cmd}")
 
             # Execute the command
-            await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing confirmed command {cmd}"')
+            await self._execute_gcode('RESPOND MSG="Numpad macros: Executing confirmed command {}"'
+                                        .format(strip_comments(cmd)))
             await self._execute_gcode(cmd)
 
             # Notify of execution
@@ -346,7 +350,7 @@ class NumpadMacros:
             if cmd is not None:
                 if self.debug_log:
                     self.logger.debug(f"Executing adjustment command: {cmd}")
-                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
+                await self._execute_gcode('RESPOND MSG="Numpad macros: {}"'.format(strip_comments(cmd)))
                 await self._execute_gcode(cmd)
             else:
                 if self.debug_log:
@@ -396,7 +400,7 @@ class NumpadMacros:
 
         except Exception as e:
             msg = f"{self.name}: Error fetching Klippy state: {str(e)}"
-            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
+            await self._execute_gcode('RESPOND TYPE=error MSG="Numpad macros: {}"'.format(strip_comments(msg)))
             self.logger.exception(msg)
             self._reset_state()
             raise self.server.error(msg, 503)
