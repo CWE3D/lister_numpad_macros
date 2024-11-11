@@ -134,7 +134,7 @@ class NumpadMacros:
                         )
             else:
                 # Option not in config
-                self.command_mapping[key] = '_NO_ASSIGNED_MACRO KEY={}'.format(key)
+                self.command_mapping[key] = f'_NO_ASSIGNED_MACRO KEY={key}'
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
@@ -146,18 +146,6 @@ class NumpadMacros:
                 self.logger.debug(f"Received event - Key: {key}, Type: {event_type}")
                 self.logger.debug(f"Current state - pending_key: {self.pending_key}, "
                                   f"pending_command: {self.pending_command}")
-
-            # if self.command_mapping[key] is None:
-            #     await self._execute_gcode('RESPOND MSG="Numpad macros: Not assigned {key} (assign in macros.cfg)"'
-            #                               .format(key=key))
-            #     return {'status': 'ignored'}
-
-            # Only process key down events
-            # TODO: What is going on here...
-            # if event_type != 'down':
-            #     if self.debug_log:
-            #         self.logger.debug("Ignoring non-down event")
-            #     return {'status': 'ignored'}
 
             # THE MOST 1ST ORDER IMPORTANT KEY
             # First, check if it's a confirmation key
@@ -185,7 +173,7 @@ class NumpadMacros:
                     if self.debug_log:
                         self.logger.debug(f"Executing no-confirmation command: {command}")
 
-                    await self._execute_gcode('RESPOND MSG="Numpad macros: Executing {}"'.format(command))
+                    await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing {command}"')
                     await self._execute_gcode(command)
 
                     # Maintain status updates and notifications
@@ -213,18 +201,11 @@ class NumpadMacros:
         if self.debug_log:
             self.logger.debug(f"Processing command key: {key}")
 
-        # Check if command exists
-        # if self.command_mapping[key] is None or key not in self.initial_query_command_mapping:
-        #     await self._execute_gcode(
-        #         'RESPOND MSG="Numpad macros: No command mapping for {}"'.format(key)
-        #     )
-        #     return
-
         # Store as pending command (replaces any existing pending command)
         if self.pending_key and self.pending_key != key:
             await self._execute_gcode(
-                'RESPOND MSG="Numpad macros: Replacing pending command {}"'
-                    .format(self.command_mapping[self.pending_key])
+                f'RESPOND MSG="Numpad macros: Replacing pending command '
+                f'{self.command_mapping[self.pending_key]} with {self.command_mapping[key]}"'
             )
 
         # Store the pending command
@@ -233,13 +214,11 @@ class NumpadMacros:
 
         # Run the QUERY version for confirmation-required commands
         query_cmd = self.initial_query_command_mapping[key]
-        await self._execute_gcode('RESPOND MSG="Numpad macros: Running query {}"'
-                                .format(query_cmd))
+        await self._execute_gcode(f'RESPOND MSG="Numpad macros: Running query {query_cmd}"')
         await self._execute_gcode(query_cmd)
 
         await self._execute_gcode(
-            'RESPOND MSG="Numpad macros: Command {} is ready. Press ENTER to execute"'
-                .format(self.pending_command)
+            f'RESPOND MSG="Numpad macros: Command {self.pending_command} is ready. Press ENTER to execute"'
         )
 
         self._notify_status_update()
@@ -267,8 +246,8 @@ class NumpadMacros:
                 self.logger.debug(f"Executing confirmed command: {cmd}")
 
             # Execute the command
-            await self._execute_gcode('RESPOND MSG="Numpad macros: Executing confirmed command {}"'
-                                        .format(cmd))
+            await self._execute_gcode(f'RESPOND MSG="Numpad macros: Executing confirmed command {cmd}"')
+
             await self._execute_gcode(cmd)
 
             # Notify of execution
@@ -312,6 +291,7 @@ class NumpadMacros:
                     self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
 
                 # Determine step size based on height
+                # PLEASE DO NOT SIMPLIFY, TESTZ Z+/- string is intentional
                 if current_z < 0.1:
                     cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}"
                     if self.debug_log:
@@ -373,7 +353,7 @@ class NumpadMacros:
             if cmd is not None:
                 if self.debug_log:
                     self.logger.debug(f"Executing adjustment command: {cmd}")
-                await self._execute_gcode('RESPOND MSG="Numpad macros: {}"'.format(cmd))
+                await self._execute_gcode(f'RESPOND MSG="Numpad macros: {cmd}"')
                 await self._execute_gcode(cmd)
             else:
                 if self.debug_log:
@@ -423,7 +403,7 @@ class NumpadMacros:
 
         except Exception as e:
             msg = f"{self.name}: Error fetching Klippy state: {str(e)}"
-            await self._execute_gcode('RESPOND TYPE=error MSG="Numpad macros: {}"'.format(msg))
+            await self._execute_gcode(f'RESPOND TYPE=error MSG="Numpad macros: {msg}"')
             self.logger.exception(msg)
             self._reset_state()
             raise self.server.error(msg, 503)
