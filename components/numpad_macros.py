@@ -205,7 +205,7 @@ class NumpadMacros:
         if self.pending_key and self.pending_key != key:
             await self._execute_gcode(
                 f'RESPOND MSG="Numpad macros: Replacing pending command '
-                f'{self.command_mapping[self.pending_key]} with {self.command_mapping[key]}"'
+                # f'{self.command_mapping[self.pending_key]} with {self.command_mapping[key]}"'
             )
 
         # Store the pending command
