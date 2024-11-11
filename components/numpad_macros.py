@@ -134,7 +134,7 @@ class NumpadMacros:
                         )
             else:
                 # Option not in config
-                self.command_mapping[key] = f'_NO_ASSIGNED_MACRO KEY={key}'
+                self.initial_query_command_mapping[key] = f'_NO_ASSIGNED_MACRO KEY={key}'
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
