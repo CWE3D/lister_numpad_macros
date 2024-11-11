@@ -133,7 +133,8 @@ class NumpadMacros:
                             f"Query: {self.initial_query_command_mapping[key]}"
                         )
             else:
-                # Option not in config
+                # Option not in config - add to both mappings
+                self.command_mapping[key] = f'_NO_ASSIGNED_MACRO KEY={key}'
                 self.initial_query_command_mapping[key] = f'_NO_ASSIGNED_MACRO KEY={key}'
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
@@ -205,7 +206,7 @@ class NumpadMacros:
         if self.pending_key and self.pending_key != key:
             await self._execute_gcode(
                 f'RESPOND MSG="Numpad macros: Replacing pending command '
-                # f'{self.command_mapping[self.pending_key]} with {self.command_mapping[key]}"'
+                f'{self.command_mapping[self.pending_key]} with {self.command_mapping[key]}"'
             )
 
         # Store the pending command
