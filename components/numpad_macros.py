@@ -67,9 +67,6 @@ class NumpadMacros:
         self.no_confirm_keys: SetType[str] = set(k.strip() for k in no_confirm_str.split(','))
         self.confirmation_keys: SetType[str] = set(k.strip() for k in confirm_str.split(','))
 
-        # Include confirmation keys in no_confirm_keys set
-        self.no_confirm_keys = self.no_confirm_keys.union(self.confirmation_keys)
-
         if self.debug_log:
             self.logger.debug(f"No confirmation required for keys: {self.no_confirm_keys}")
             self.logger.debug(f"Confirmation keys: {self.confirmation_keys}")
@@ -135,11 +132,9 @@ class NumpadMacros:
                             f"Loaded mapping for {key} -> Command: {self.command_mapping[key]}, "
                             f"Query: {self.initial_query_command_mapping[key]}"
                         )
-            #     else:
-            #         self.command_mapping[key] = None
-            # else:
-            #     # Option not in config
-            #     self.command_mapping[key] = None
+            else:
+                # Option not in config
+                self.command_mapping[key] = '_NO_ASSIGNED_MACRO KEY={}'.format(key)
 
     async def _handle_numpad_event(self, web_request: WebRequest) -> Dict[str, Any]:
         try:
@@ -181,7 +176,7 @@ class NumpadMacros:
                 # Handle adjustment keys specially
                 # Check if we are dealing with up and down, they are special 3RD ORDER
                 if key in ['key_up', 'key_down']:
-                    await self._handle_adjustment(key)
+                    await self._handle_knob_adjustment(key)
                 else:
                     # Now we can run the query command directly because
                     # we are dealing with real command as is no confirmation key.
@@ -294,7 +289,7 @@ class NumpadMacros:
             self._notify_status_update()
 
     # The updated _handle_adjustment method:
-    async def _handle_adjustment(self, key: str) -> None:
+    async def _handle_knob_adjustment(self, key: str) -> None:
         """Handle immediate adjustment commands (up/down keys)"""
         try:
             if self.debug_log:
@@ -323,6 +318,7 @@ class NumpadMacros:
                         self.logger.debug(f"Using fine adjustment mode: {cmd}")
                 else:
                     step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
+
                     cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}{step_size:.3f}"
                     if self.debug_log:
                         self.logger.debug(f"Using coarse adjustment with step size: {step_size:.3f}")
@@ -335,7 +331,7 @@ class NumpadMacros:
                 if self.debug_log:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
-                if current_z < 1.0:
+                if current_z <= 1.0:
                     # Z offset adjustment
                     ## NOTE LOGIC CANNOT BE SIMPLIFIED
                     ## This is intentionally two separate strings as one cannot pass a negative
