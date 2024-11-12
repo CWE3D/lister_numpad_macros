@@ -349,6 +349,17 @@ class NumpadMacros:
                             f"Speed adjustment: {cmd} (previous: {current_speed}%, new: {new_speed}%, "
                             f"limits: {min_speed}%-{max_speed}%, step: {increment}%)"
                         )
+            else:
+                '''Standby mode: WE can now handle the volume knobs'''
+                if key == 'key_up':
+                    await self._execute_gcode('RESPOND MSG="Volume up"')
+                    await self._execute_gcode('VOLUME_UP')
+                else:
+                    await self._execute_gcode('RESPOND MSG="Volume down"')
+                    await self._execute_gcode('VOLUME_DOWN')
+
+                if self.debug_log:
+                    self.logger.debug("No adjustment command was generated")
 
             # Execute the command only if one was set
             if cmd is not None:
