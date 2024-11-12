@@ -353,10 +353,10 @@ class NumpadMacros:
                 '''Standby mode: WE can now handle the volume knobs'''
                 if key == 'key_up':
                     await self._execute_gcode('RESPOND MSG="Volume up"')
-                    # await self._execute_gcode('VOLUME_UP')
+                    await self._execute_gcode('VOLUME_UP')
                 else:
                     await self._execute_gcode('RESPOND MSG="Volume down"')
-                    # await self._execute_gcode('VOLUME_DOWN')
+                    await self._execute_gcode('VOLUME_DOWN')
 
                 if self.debug_log:
                     self.logger.debug("No adjustment command was generated")
