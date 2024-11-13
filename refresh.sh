@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Update script for lister_numpad_macros plugin.
 # Define colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
