@@ -1,7 +1,11 @@
 from __future__ import annotations
 import logging
+import time
 from typing import TYPE_CHECKING, Dict, Any, Optional, Set as SetType
 import re
+
+import asyncio
+
 
 def strip_comments(code):
     # This regex removes everything after a '#' unless it's inside a string
@@ -81,6 +85,12 @@ class NumpadMacros:
         self.pending_command: Optional[str] = None
         self.is_probing: bool = False
         self._is_printing: bool = False
+        self.z_offset_save_delay = config.getfloat(
+            'z_offset_save_delay', 3.0, above=0.
+        )
+        self._pending_z_offset_save = False
+        self._last_z_adjust_time = 0.0
+        self._accumulated_z_adjust = 0.0
 
         # Register endpoints
         self.server.register_endpoint(
@@ -319,8 +329,18 @@ class NumpadMacros:
                     ## value to Z_ADJUST={-5} (the negative is a string), string is "Z_ADJUST=-"
                     if key == 'key_up':
                         cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
+                        adjustment = self.z_adjust_increment
                     else:
                         cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
+                        adjustment = -self.z_adjust_increment
+
+                    # Track the adjustment
+                    self._accumulated_z_adjust += adjustment
+                    self._last_z_adjust_time = time.time()
+                    self._pending_z_offset_save = True
+
+                    # Schedule the save after delay
+                    self.event_loop.create_task(self._delayed_save_z_offset())
 
                     if self.debug_log:
                         self.logger.debug(f"First layer Z adjustment: {cmd}")
@@ -448,12 +468,53 @@ class NumpadMacros:
         """Handle Klippy shutdown event"""
         self._reset_state()
 
+    async def _delayed_save_z_offset(self) -> None:
+        """Save the accumulated Z offset after a delay"""
+        try:
+            await asyncio.sleep(self.z_offset_save_delay)
+
+            # Check if this is the most recent adjustment
+            if time.time() - self._last_z_adjust_time >= self.z_offset_save_delay:
+                if self._pending_z_offset_save:
+                    # Get current z_offset from variables
+                    kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+                    result = await kapis.query_objects({'gcode_macro SAVE_VARIABLE': None})
+                    current_offset = float(result.get('gcode_macro SAVE_VARIABLE', {}).get('z_offset', 0.0))
+
+                    # Calculate new offset
+                    new_offset = current_offset + self._accumulated_z_adjust
+
+                    # Save the new offset
+                    await self._execute_gcode(
+                        f'SAVE_VARIABLE VARIABLE=real_z_offset VALUE={new_offset}'
+                    )
+
+                    if self.debug_log:
+                        self.logger.debug(
+                            f"Saved new Z offset: {new_offset} "
+                            f"(Previous: {current_offset}, "
+                            f"Adjustment: {self._accumulated_z_adjust})"
+                        )
+
+                    # Reset tracking variables
+                    self._accumulated_z_adjust = 0.0
+                    self._pending_z_offset_save = False
+
+        except Exception as e:
+            self.logger.exception("Error saving Z offset")
+            await self._execute_gcode(
+                f'RESPOND TYPE=error MSG="Error saving Z offset: {str(e)}"'
+            )
+
     def _reset_state(self) -> None:
         """Reset all state variables"""
         self.pending_key = None
-        self.pending_command = None  # This was missing
+        self.pending_command = None
         self._is_printing = False
         self.is_probing = False
+        self._accumulated_z_adjust = 0.0
+        self._pending_z_offset_save = False
+        self._last_z_adjust_time = 0.0
         self._notify_status_update()
 
     async def _get_toolhead_position(self) -> Dict[str, float]:
