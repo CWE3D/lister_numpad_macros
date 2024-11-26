@@ -151,10 +151,20 @@ def main():
     for key, value in DEBOUNCE_CONFIG.items():
         logger.info(f"- {key}: {value}ms")
 
-    keyboard.hook(on_key_event)
+    while True:
+        try:
+            # Unhook any existing hooks to prevent duplicate event listeners
+            keyboard.unhook_all()
+            
+            # Hook the key event handler
+            keyboard.hook(on_key_event)
 
-    logger.info("Listening for key down events...")
-    keyboard.wait()
+            logger.info("Listening for key down events...")
+            keyboard.wait()
+        except Exception as e:
+            logger.error(f"Error in keyboard event listener: {e}")
+            logger.info("Attempting to restart keyboard listener in 5 seconds...")
+            time.sleep(5)  # Wait before retrying to prevent rapid error loops
 
 if __name__ == "__main__":
     main()
