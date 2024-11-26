@@ -3,6 +3,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Dict, Any, Optional, Set as SetType
 import re
+import subprocess
 
 import asyncio
 
@@ -460,12 +461,24 @@ class NumpadMacros:
             self.get_status()
         )
 
-    async def _handle_ready(self) -> None:
-        """Handle Klippy ready event"""
+    def _restart_numpad_event_service(self):
+        """Restart the numpad_event_service using systemctl"""
+        try:
+            self.logger.info("Restarting numpad_event_service...")
+            subprocess.run(["systemctl", "restart", "numpad_event_service"], check=True)
+            self.logger.info("numpad_event_service restarted successfully.")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to restart numpad_event_service: {e}")
+
+    async def _handle_ready(self):
+        """Handle the server ready event by restarting the numpad_event_service"""
+        self.logger.info("Handling server ready event.")
+        self._restart_numpad_event_service()
         await self._check_klippy_state()
 
-    async def _handle_shutdown(self) -> None:
-        """Handle Klippy shutdown event"""
+    async def _handle_shutdown(self):
+        """Handle the server shutdown event"""
+        self.logger.info("Handling server shutdown event.")
         self._reset_state()
 
     async def _delayed_save_z_offset(self) -> None:
