@@ -15,9 +15,9 @@ BACKUP_COUNT = 3
 
 # Debounce configuration (in milliseconds)
 DEBOUNCE_CONFIG = {
-    "key_up": 1000,    # 100ms for up key
-    "key_down": 1000,  # 100ms for down key
-    "default": 50     # 50ms default for other keys
+    "key_up": 600,    # 600ms for up key
+    "key_down": 600,  # 600ms for down key
+    "default": 200     # 50ms default for other keys
 }
 
 # Request timeout (in seconds)
@@ -40,6 +40,18 @@ SCAN_CODE_MAPPING = {
     96: "key_enter",  # KEY_KPENTER
     114: "key_down",  # KEY_VOLUMEDOWN
     115: "key_up",  # KEY_VOLUMEUP
+    
+    # Numpad alternative keys
+    30: "key_1_alt",  # KEY_A
+    48: "key_2_alt",  # KEY_B
+    46: "key_3_alt",  # KEY_C
+    32: "key_4_alt",  # KEY_D
+    18: "key_5_alt",  # KEY_E
+    33: "key_6_alt",  # KEY_F
+    36: "key_7_alt",  # KEY_J
+    38: "key_8_alt",  # KEY_L
+    50: "key_9_alt",  # KEY_M
+    37: "key_0_alt",  # KEY_K
 
     # Regular number keys (for alt mode)
     2: "key_1_alt",  # KEY_1
