@@ -110,10 +110,6 @@ Environment=PYTHONUNBUFFERED=1
 [Install]
 WantedBy=multi-user.target
 EOL
-
-    # Make service file executable
-    chmod +x "${REPO_DIR}/extras/numpad_event_service.py"
-
     # Reload systemd and enable service
     systemctl daemon-reload
     systemctl enable numpad_event_service.service
