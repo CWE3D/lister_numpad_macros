@@ -42,8 +42,11 @@ update_repo() {
         git clone https://github.com/CWE3D/lister_numpad_macros.git "$REPO_DIR"
     else
         cd "$REPO_DIR" || exit 1
+        log_message "Resetting repository to clean state..."
+        git reset --hard
+        git clean -fd
         git fetch
-
+        
         LOCAL=$(git rev-parse @)
         REMOTE=$(git rev-parse @{u})
 

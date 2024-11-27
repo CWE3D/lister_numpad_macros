@@ -147,12 +147,24 @@ restart_services() {
     systemctl restart moonraker
 }
 
+# Function to update repository (if it exists)
+update_repo() {
+    if [ -d "$REPO_DIR" ]; then
+        log_message "Resetting repository to clean state..."
+        cd "$REPO_DIR" || exit 1
+        git reset --hard
+        git clean -fd
+        git pull origin main
+    fi
+}
+
 # Main installation process
 main() {
     log_message "Starting Numpad Macros installation..."
 
     check_root
     check_directories
+    update_repo
     install_system_deps
     setup_user_permissions
     install_python_deps
