@@ -75,10 +75,27 @@ install_system_deps() {
 
 # Setup user permissions
 setup_user_permissions() {
-    log_message "Adding user pi to input group..."
+    log_message "Setting up permissions..."
+    
+    # Add user pi to input group
     usermod -a -G input pi
 
-    # Set correct ownership for repository
+    # Set base permissions for repository
+    find "$REPO_DIR" -type d -exec chmod 755 {} \;
+    find "$REPO_DIR" -type f -exec chmod 644 {} \;
+
+    # Set executable permissions based on .gitattributes
+    if [ -f "$REPO_DIR/.gitattributes" ]; then
+        cd "$REPO_DIR" || exit 1
+        while IFS= read -r line; do
+            if [[ $line == *"executable"* ]]; then
+                pattern=$(echo "$line" | cut -d' ' -f1)
+                find "$REPO_DIR" -type f -name "$pattern" -exec chmod 755 {} \;
+            fi
+        done < .gitattributes
+    fi
+
+    # Set ownership
     chown -R pi:pi "$REPO_DIR"
 }
 
