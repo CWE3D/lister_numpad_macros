@@ -489,18 +489,27 @@ class NumpadMacros:
             # Check if this is the most recent adjustment
             if time.time() - self._last_z_adjust_time >= self.z_offset_save_delay:
                 if self._pending_z_offset_save:
-                    # Simply save the accumulated adjustment
+                    # Get current real_z_offset value
+                    kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
+                    result = await kapis.query_objects({'save_variables': None})
+                    current_offset = result.get('save_variables', {}).get('variables', {}).get('real_z_offset', 0.0)
+                    
+                    # Calculate new total offset
+                    new_total_offset = float(current_offset) + self._accumulated_z_adjust
+
+                    # Save the total offset
                     await self._execute_gcode(
-                        f'SAVE_VARIABLE VARIABLE=real_z_offset VALUE={self._accumulated_z_adjust}'
+                        f'SAVE_VARIABLE VARIABLE=real_z_offset VALUE={new_total_offset}'
                     )
 
                     if self.debug_log:
                         self.logger.debug(
-                            f"Saved Z offset adjustment: {self._accumulated_z_adjust}"
+                            f"Saved Z offset adjustment: current({current_offset}) + "
+                            f"accumulated({self._accumulated_z_adjust}) = new({new_total_offset})"
                         )
 
                     # Reset tracking variables
-                    self._accumulated_z_adjust = 0.0
+                    self._accumulated_z_adjust = 0.0  # Now safe to reset as we've incorporated it into the total
                     self._pending_z_offset_save = False
 
         except Exception as e:
