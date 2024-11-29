@@ -482,40 +482,44 @@ class NumpadMacros:
         self._reset_state()
 
     async def _delayed_save_z_offset(self) -> None:
-        """Save the accumulated Z offset after a delay"""
+        """Save the Z adjustment by modifying true_max_height"""
         try:
             await asyncio.sleep(self.z_offset_save_delay)
 
             # Check if this is the most recent adjustment
             if time.time() - self._last_z_adjust_time >= self.z_offset_save_delay:
                 if self._pending_z_offset_save:
-                    # Get current real_z_offset value
+                    # Get current true_max_height
                     kapis: KlippyAPI = self.server.lookup_component('klippy_apis')
                     result = await kapis.query_objects({'save_variables': None})
-                    current_offset = result.get('save_variables', {}).get('variables', {}).get('real_z_offset', 0.0)
+                    current_true_max = result.get('save_variables', {}).get('variables', {}).get('true_max_height', 0.0)
                     
-                    # Calculate new total offset
-                    new_total_offset = float(current_offset) + self._accumulated_z_adjust
+                    # For positive adjustment (up), subtract from true_max_height
+                    # For negative adjustment (down), add to true_max_height
+                    new_true_max = float(current_true_max) - self._accumulated_z_adjust
 
-                    # Save the total offset
+                    # Save the new true_max_height
                     await self._execute_gcode(
-                        f'SAVE_VARIABLE VARIABLE=real_z_offset VALUE={new_total_offset}'
+                        f'SAVE_VARIABLE VARIABLE=true_max_height VALUE={new_true_max}'
                     )
 
                     if self.debug_log:
                         self.logger.debug(
-                            f"Saved Z offset adjustment: current({current_offset}) + "
-                            f"accumulated({self._accumulated_z_adjust}) = new({new_total_offset})"
+                            f"Adjusted true_max_height: current({current_true_max}) adjusted by "
+                            f"(-{self._accumulated_z_adjust}) = new({new_true_max})"
                         )
 
                     # Reset tracking variables
-                    self._accumulated_z_adjust = 0.0  # Now safe to reset as we've incorporated it into the total
+                    self._accumulated_z_adjust = 0.0
                     self._pending_z_offset_save = False
 
+                    # Update park_z with new true_max_height
+                    await self._execute_gcode('UPDATE_PARK_Z')
+
         except Exception as e:
-            self.logger.exception("Error saving Z offset")
+            self.logger.exception("Error saving Z adjustment")
             await self._execute_gcode(
-                f'RESPOND TYPE=error MSG="Error saving Z offset: {str(e)}"'
+                f'RESPOND TYPE=error MSG="Error saving Z adjustment: {str(e)}"'
             )
 
     def _reset_state(self) -> None:

@@ -33,29 +33,6 @@ check_root() {
     fi
 }
 
-# Function to fix permissions
-fix_permissions() {
-    log_message "Fixing permissions..."
-    
-    # Set base permissions for repository
-    find "$REPO_DIR" -type d -exec chmod 755 {} \;
-    find "$REPO_DIR" -type f -exec chmod 644 {} \;
-
-    # Set executable permissions based on .gitattributes
-    if [ -f "$REPO_DIR/.gitattributes" ]; then
-        cd "$REPO_DIR" || exit 1
-        while IFS= read -r line; do
-            if [[ $line == *"executable"* ]]; then
-                pattern=$(echo "$line" | cut -d' ' -f1)
-                find "$REPO_DIR" -type f -name "$pattern" -exec chmod 755 {} \;
-            fi
-        done < .gitattributes
-    fi
-
-    # Set ownership
-    chown -R pi:pi "$REPO_DIR"
-}
-
 # Function to update repository
 update_repo() {
     log_message "Updating numpad macros repository..."
@@ -63,7 +40,6 @@ update_repo() {
     if [ ! -d "$REPO_DIR" ]; then
         log_message "Repository not found. Cloning..."
         git clone https://github.com/CWE3D/lister_numpad_macros.git "$REPO_DIR"
-        fix_permissions
     else
         cd "$REPO_DIR" || exit 1
         log_message "Resetting repository to clean state..."
@@ -77,7 +53,6 @@ update_repo() {
         if [ "$LOCAL" != "$REMOTE" ]; then
             log_message "Updates found. Pulling changes..."
             git pull
-            fix_permissions
             return 0
         else
             log_message "Already up to date"

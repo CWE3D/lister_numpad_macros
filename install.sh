@@ -80,22 +80,7 @@ setup_user_permissions() {
     # Add user pi to input group
     usermod -a -G input pi
 
-    # Set base permissions for repository
-    find "$REPO_DIR" -type d -exec chmod 755 {} \;
-    find "$REPO_DIR" -type f -exec chmod 644 {} \;
-
-    # Set executable permissions based on .gitattributes
-    if [ -f "$REPO_DIR/.gitattributes" ]; then
-        cd "$REPO_DIR" || exit 1
-        while IFS= read -r line; do
-            if [[ $line == *"executable"* ]]; then
-                pattern=$(echo "$line" | cut -d' ' -f1)
-                find "$REPO_DIR" -type f -name "$pattern" -exec chmod 755 {} \;
-            fi
-        done < .gitattributes
-    fi
-
-    # Set ownership
+    # Set correct ownership for repository
     chown -R pi:pi "$REPO_DIR"
 }
 
