@@ -38,7 +38,7 @@ class NumpadMacros:
 
         # Get configuration values
         self.z_adjust_increment = config.getfloat(
-            'z_adjust_increment', 0.01, above=0., below=1.
+            'z_adjust_increment', 0.01, above=-1., below=1.
         )
 
         # Get speed settings from config with defaults
@@ -87,7 +87,7 @@ class NumpadMacros:
         self.is_probing: bool = False
         self._is_printing: bool = False
         self.z_offset_save_delay = config.getfloat(
-            'z_offset_save_delay', 3.0, above=0.
+            'z_offset_save_delay', 10.0, above=0.
         )
         self._pending_z_offset_save = False
         self._last_z_adjust_time = 0.0
