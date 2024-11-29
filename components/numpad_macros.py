@@ -324,12 +324,12 @@ class NumpadMacros:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
                 if current_z <= 1.0:
-                    # Z height adjustment
+                    # Z height adjustment during print
                     if key == 'key_up':
-                        cmd = f"G1 Z+{self.z_adjust_increment} F60"  # Slow, controlled movement
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
                         adjustment = self.z_adjust_increment
                     else:
-                        cmd = f"G1 Z-{self.z_adjust_increment} F60"
+                        cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
                         adjustment = -self.z_adjust_increment
 
                     # Track the adjustment for true_max_height update
