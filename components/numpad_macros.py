@@ -305,15 +305,25 @@ class NumpadMacros:
                 # Determine step size based on height
                 # PLEASE DO NOT SIMPLIFY, TESTZ Z+/- string is intentional
                 if current_z < 0.1:
-                    cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}"
-                    if self.debug_log:
-                        self.logger.debug(f"Using fine adjustment mode: {cmd}")
+                    # For micro adjustments, play sound, execute command, then play sync sound
+                    if key == 'key_up':
+                        await self._execute_gcode('_FURTHER_KNOB_PROBE_MICRO_CALIBRATE')
+                        cmd = "TESTZ Z=+"
+                        await self._execute_gcode(cmd)
+                        await self._execute_gcode('_FURTHER_KNOB_PROBE_MICRO_CALIBRATE')
+                    else:
+                        await self._execute_gcode('_NEARER_KNOB_PROBE_MICRO_CALIBRATE')
+                        cmd = "TESTZ Z=-"
+                        await self._execute_gcode(cmd)
+                        await self._execute_gcode('_NEARER_KNOB_PROBE_MICRO_CALIBRATE')
                 else:
                     step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
-
-                    cmd = f"TESTZ Z={'+' if key == 'key_up' else '-'}{step_size:.3f}"
-                    if self.debug_log:
-                        self.logger.debug(f"Using coarse adjustment with step size: {step_size:.3f}")
+                    if key == 'key_up':
+                        cmd = f"TESTZ Z=+{step_size:.3f}"
+                        await self._execute_gcode('_FURTHER_KNOB_PROBE_CALIBRATE')
+                    else:
+                        cmd = f"TESTZ Z=-{step_size:.3f}"
+                        await self._execute_gcode('_NEARER_KNOB_PROBE_CALIBRATE')
 
             elif self._is_printing:
                 # Get Z height to determine mode
@@ -324,24 +334,16 @@ class NumpadMacros:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
                 if current_z <= 1.0:
-                    # Z height adjustment during print
+                    # Z offset adjustment during print
                     if key == 'key_up':
                         cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
                         adjustment = self.z_adjust_increment
+                        await self._execute_gcode('_FURTHER_KNOB_FIRST_LAYER')  # Sound for up
                     else:
                         cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
                         adjustment = -self.z_adjust_increment
+                        await self._execute_gcode('_NEARER_KNOB_FIRST_LAYER')   # Sound for down
 
-                    # Track the adjustment for true_max_height update
-                    self._accumulated_z_adjust += adjustment
-                    self._last_z_adjust_time = time.time()
-                    self._pending_z_offset_save = True
-
-                    # Schedule the save after delay
-                    self.event_loop.create_task(self._delayed_save_z_offset())
-
-                    if self.debug_log:
-                        self.logger.debug(f"First layer Z adjustment: {cmd}")
                 else:
                     # Speed adjustment using M220
                     # Get current speed factor
@@ -356,24 +358,20 @@ class NumpadMacros:
                     # Calculate new speed value
                     if key == 'key_up':
                         new_speed = min(current_speed + increment, max_speed)
+                        await self._execute_gcode('_INCREASE_KNOB_SPEED')  # Sound for speed up
                     else:
                         new_speed = max(current_speed - increment, min_speed)
+                        await self._execute_gcode('_DEACREASE_KNOB_SPEED')  # Sound for speed down
 
-                    # Set the absolute speed value
                     cmd = f"M220 S{int(new_speed)}"
 
-                    if self.debug_log:
-                        self.logger.debug(
-                            f"Speed adjustment: {cmd} (previous: {current_speed}%, new: {new_speed}%, "
-                            f"limits: {min_speed}%-{max_speed}%, step: {increment}%)"
-                        )
             else:
-                '''Standby mode: WE can now handle the volume knobs'''
+                # Standby mode: Volume control
                 if key == 'key_up':
-                    await self._execute_gcode('RESPOND MSG="Volume up"')
+                    await self._execute_gcode('_INCREASE_KNOB_VOLUME')  # Sound for volume up
                     await self._execute_gcode('VOLUME_UP')
                 else:
-                    await self._execute_gcode('RESPOND MSG="Volume down"')
+                    await self._execute_gcode('_DEACREASE_KNOB_VOLUME')  # Sound for volume down
                     await self._execute_gcode('VOLUME_DOWN')
 
                 if self.debug_log:
