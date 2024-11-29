@@ -324,18 +324,15 @@ class NumpadMacros:
                     self.logger.debug(f"Print adjustment - Current Z: {current_z}")
 
                 if current_z <= 1.0:
-                    # Z offset adjustment
-                    ## NOTE LOGIC CANNOT BE SIMPLIFIED
-                    ## This is intentionally two separate strings as one cannot pass a negative
-                    ## value to Z_ADJUST={-5} (the negative is a string), string is "Z_ADJUST=-"
+                    # Z height adjustment
                     if key == 'key_up':
-                        cmd = f"SET_GCODE_OFFSET Z_ADJUST={self.z_adjust_increment} MOVE=1"
+                        cmd = f"G1 Z+{self.z_adjust_increment} F60"  # Slow, controlled movement
                         adjustment = self.z_adjust_increment
                     else:
-                        cmd = f"SET_GCODE_OFFSET Z_ADJUST=-{self.z_adjust_increment} MOVE=1"
+                        cmd = f"G1 Z-{self.z_adjust_increment} F60"
                         adjustment = -self.z_adjust_increment
 
-                    # Track the adjustment
+                    # Track the adjustment for true_max_height update
                     self._accumulated_z_adjust += adjustment
                     self._last_z_adjust_time = time.time()
                     self._pending_z_offset_save = True
