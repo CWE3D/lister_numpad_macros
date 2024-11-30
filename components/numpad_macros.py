@@ -54,7 +54,7 @@ class NumpadMacros:
 
         # Add configuration for probe adjustments
         self.probe_min_step = config.getfloat(
-            'probe_min_step', 0.01, above=0., below=1.
+            'probe_min_step', 0.025, above=0., below=1.
         )
         self.probe_coarse_multiplier = config.getfloat(
             'probe_coarse_multiplier', 0.5, above=0., below=1.
@@ -303,27 +303,23 @@ class NumpadMacros:
                     self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
 
                 # Determine step size based on height
-                # PLEASE DO NOT SIMPLIFY, TESTZ Z+/- string is intentional
                 if current_z < 0.1:
-                    # For micro adjustments, play sound, execute command, then play sync sound
+                    # Fine adjustment mode using probe_min_step (0.025mm)
                     if key == 'key_up':
                         await self._execute_gcode('_FURTHER_KNOB_PROBE_MICRO_CALIBRATE')
-                        cmd = "TESTZ Z=+"
-                        await self._execute_gcode(cmd)
-                        await self._execute_gcode('_FURTHER_KNOB_PROBE_MICRO_CALIBRATE')
+                        cmd = f"TESTZ Z=+{self.probe_min_step:.3f}"
                     else:
                         await self._execute_gcode('_NEARER_KNOB_PROBE_MICRO_CALIBRATE')
-                        cmd = "TESTZ Z=-"
-                        await self._execute_gcode(cmd)
-                        await self._execute_gcode('_NEARER_KNOB_PROBE_MICRO_CALIBRATE')
+                        cmd = f"TESTZ Z=-{self.probe_min_step:.3f}"
                 else:
+                    # Keep existing coarse adjustment logic
                     step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
                     if key == 'key_up':
-                        cmd = f"TESTZ Z=+{step_size:.3f}"
                         await self._execute_gcode('_FURTHER_KNOB_PROBE_CALIBRATE')
+                        cmd = f"TESTZ Z=+{step_size:.3f}"
                     else:
-                        cmd = f"TESTZ Z=-{step_size:.3f}"
                         await self._execute_gcode('_NEARER_KNOB_PROBE_CALIBRATE')
+                        cmd = f"TESTZ Z=-{step_size:.3f}"
 
             elif self._is_printing:
                 # Get Z height to determine mode
