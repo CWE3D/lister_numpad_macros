@@ -59,6 +59,15 @@ class NumpadMacros:
         self.probe_coarse_multiplier = config.getfloat(
             'probe_coarse_multiplier', 0.5, above=0., below=1.
         )
+        self.probe_fine_multiplier = config.getfloat(
+            'probe_fine_multiplier', 0.2, above=0., below=1.
+        )
+        self.probe_fine_min_step = config.getfloat(
+            'probe_fine_min_step', 0.01, above=0., below=1.
+        )
+        self.fine_tune_from = config.getfloat(
+            'fine_tune_from', 0.05, above=0., below=1.
+        )
 
         # Define default no-confirm and confirmation keys
         default_no_confirm = "key_up,key_down"
@@ -303,14 +312,15 @@ class NumpadMacros:
                     self.logger.debug(f"Probe adjustment - Current Z: {current_z}")
 
                 # Determine step size based on height
-                if current_z < 0.1:
-                    # Fine adjustment mode using probe_min_step (0.025mm)
+                if current_z < self.fine_tune_from:  # Use configurable threshold
+                    # Fine adjustment mode using configurable multiplier
+                    step_size = max(current_z * self.probe_fine_multiplier, self.probe_fine_min_step)
                     if key == 'key_up':
                         await self._execute_gcode('_FURTHER_KNOB_PROBE_MICRO_CALIBRATE')
-                        cmd = f"TESTZ Z=+{self.probe_min_step:.3f}"
+                        cmd = f"TESTZ Z=+{step_size:.3f}"
                     else:
                         await self._execute_gcode('_NEARER_KNOB_PROBE_MICRO_CALIBRATE')
-                        cmd = f"TESTZ Z=-{self.probe_min_step:.3f}"
+                        cmd = f"TESTZ Z=-{step_size:.3f}"
                 else:
                     # Keep existing coarse adjustment logic
                     step_size = max(current_z * self.probe_coarse_multiplier, self.probe_min_step)
